@@ -8,7 +8,13 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: true,
     port: 7001,
-    allowedHosts: ['*'], // allow all hosts
+    allowedHosts: [
+      'ec2-3-106-59-4.ap-southeast-2.compute.amazonaws.com',
+      'localhost',
+      '127.0.0.1',
+      '*'
+    ],
+    
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
