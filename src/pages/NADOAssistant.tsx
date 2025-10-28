@@ -2,23 +2,19 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Bot, 
   Send, 
-  MessageSquare, 
-  Lightbulb, 
-  Shield, 
-  BookOpen,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  Users,
-  FileText,
-  Settings
+  MessageSquare,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
+import { useToast } from '@/hooks/use-toast';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 interface ChatMessage {
   id: string;
@@ -26,38 +22,11 @@ interface ChatMessage {
   content: string;
   timestamp: Date;
   category?: string;
+  isStreaming?: boolean;
+  disclaimer?: string;
 }
 
-const quickActions = [
-  {
-    id: 'compliance-help',
-    title: 'Compliance Help',
-    description: 'Get guidance on regulatory requirements',
-    icon: Shield,
-    color: 'bg-blue-500'
-  },
-  {
-    id: 'training-support',
-    title: 'Training Support',
-    description: 'Assistance with staff training modules',
-    icon: BookOpen,
-    color: 'bg-green-500'
-  },
-  {
-    id: 'form-creation',
-    title: 'Form Creation',
-    description: 'Help creating custom forms and workflows',
-    icon: FileText,
-    color: 'bg-purple-500'
-  },
-  {
-    id: 'staff-management',
-    title: 'Staff Management',
-    description: 'Guidance on HR and staff processes',
-    icon: Users,
-    color: 'bg-orange-500'
-  }
-];
+// Quick links removed
 
 const suggestedQuestions = [
   "How do I create a new incident report?",
@@ -70,6 +39,7 @@ const suggestedQuestions = [
 
 export default function NADOAssistant() {
   const { user } = useUser();
+  const { toast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
@@ -81,10 +51,13 @@ export default function NADOAssistant() {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [thinkingStatus, setThinkingStatus] = useState<string>('');
+  const [currentDisclaimer, setCurrentDisclaimer] = useState<string>('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleSendMessage = async (content: string) => {
-    if (!content.trim()) return;
+    if (!content.trim() || isTyping) return;
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -96,19 +69,155 @@ export default function NADOAssistant() {
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsTyping(true);
+    setThinkingStatus('Connecting...');
+    setCurrentDisclaimer('');
 
-    // Simulate AI response
-    setTimeout(() => {
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+    // Create abort controller for this request
+    abortControllerRef.current = new AbortController();
+
+    try {
+      // Prepare conversation history for API
+      const history = messages.map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: msg.content
+      }));
+
+      const response = await fetch(`${import.meta.env.VITE_BASE_URL}/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: content.trim(),
+          history: history
+        }),
+        signal: abortControllerRef.current.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Response body is not readable');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamingMessageId = (Date.now() + 1).toString();
+      let accumulatedContent = '';
+      let messageDisclaimer = '';
+
+      // Create initial streaming message
+      const initialMessage: ChatMessage = {
+        id: streamingMessageId,
         type: 'assistant',
-        content: generateAIResponse(content),
+        content: '',
         timestamp: new Date(),
-        category: 'response'
+        category: 'response',
+        isStreaming: true
       };
-      setMessages(prev => [...prev, assistantMessage]);
+      setMessages(prev => [...prev, initialMessage]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          if (line.startsWith('event:')) {
+            const eventType = line.substring(6).trim();
+            continue;
+          }
+
+          if (line.startsWith('data:')) {
+            const dataStr = line.substring(5).trim();
+            
+            if (dataStr === '[DONE]') {
+              setIsTyping(false);
+              setThinkingStatus('');
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === streamingMessageId 
+                    ? { ...msg, isStreaming: false, disclaimer: messageDisclaimer || undefined }
+                    : msg
+                )
+              );
+              continue;
+            }
+
+            try {
+              const data = JSON.parse(dataStr);
+
+              // Handle thinking status
+              if (data.status) {
+                setThinkingStatus(data.message || data.status);
+              }
+
+              // Handle disclaimer
+              if (data.text && !data.token) {
+                messageDisclaimer = data.text;
+                setCurrentDisclaimer(data.text);
+              }
+
+              // Handle token streaming
+              if (data.token) {
+                accumulatedContent += data.token;
+                setMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === streamingMessageId 
+                      ? { ...msg, content: accumulatedContent }
+                      : msg
+                  )
+                );
+              }
+
+              // Handle history (optional - could be used for debugging)
+              if (data.history) {
+                console.log('Conversation history:', data.history);
+              }
+            } catch (e) {
+              console.warn('Failed to parse SSE data:', dataStr);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('Error streaming chat:', error);
+      
+      if (error.name === 'AbortError') {
+        toast({
+          title: "Request Cancelled",
+          description: "The chat request was cancelled.",
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Connection Error",
+          description: "Failed to connect to NADO AI. Using fallback response.",
+          variant: "destructive"
+        });
+
+        // Fallback to mock response
+        const fallbackMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: generateAIResponse(content),
+          timestamp: new Date(),
+          category: 'response'
+        };
+        setMessages(prev => [...prev, fallbackMessage]);
+      }
+      
       setIsTyping(false);
-    }, 1500);
+      setThinkingStatus('');
+    }
   };
 
   const generateAIResponse = (userInput: string): string => {
@@ -137,12 +246,7 @@ export default function NADOAssistant() {
     return "I understand you're asking about: " + userInput + ". Let me help you with that. Could you provide more specific details about what you'd like to know? I can assist with compliance guidance, training support, form creation, staff management, and general portal navigation.";
   };
 
-  const handleQuickAction = (actionId: string) => {
-    const action = quickActions.find(a => a.id === actionId);
-    if (action) {
-      handleSendMessage(`I need help with ${action.title.toLowerCase()}`);
-    }
-  };
+  // Quick links removed
 
   const handleSuggestedQuestion = (question: string) => {
     handleSendMessage(question);
@@ -151,7 +255,16 @@ export default function NADOAssistant() {
   // Auto-scroll to latest message
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
+  }, [messages, isTyping, thinkingStatus]);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background/95 to-muted/30 p-4 sm:p-6">
@@ -191,30 +304,50 @@ export default function NADOAssistant() {
                         className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
-                          className={`max-w-[85%] sm:max-w-[80%] p-3 rounded-lg max-h-48 sm:max-h-60 overflow-y-auto break-words whitespace-pre-wrap ${
-                            message.type === 'user'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-muted'
-                          }`}
+                          className={`max-w-[85%] sm:max-w-[80%] space-y-2`}
                         >
-                          <p className="text-sm leading-relaxed">{message.content}</p>
-                          <p className="text-xs opacity-70 mt-1">
-                            {message.timestamp.toLocaleTimeString()}
-                          </p>
+                          {/* Message bubble */}
+                          <div
+                            className={`p-3 rounded-lg break-words ${
+                              message.type === 'user'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-muted'
+                            }`}
+                          >
+                            <div className="text-sm leading-relaxed">
+                              {message.type === 'user' ? (
+                                <p className="text-primary-foreground">{message.content}</p>
+                              ) : (
+                                <>
+                                  <MarkdownRenderer content={message.content} />
+                                  {message.isStreaming && (
+                                    <span className="inline-block w-1 h-4 ml-1 bg-current animate-pulse" />
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Per-message disclaimer */}
+                          {message.disclaimer && !message.isStreaming && (
+                            <div className="text-xs text-muted-foreground bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded p-2">
+                              ⚠️ {message.disclaimer}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
-                    {isTyping && (
+
+                    {/* Thinking Status */}
+                    {thinkingStatus && (
                       <div className="flex justify-start">
-                        <div className="bg-muted p-3 rounded-lg">
-                          <div className="flex space-x-1">
-                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                          </div>
-                        </div>
+                        <Badge variant="secondary" className="gap-2 animate-pulse">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          {thinkingStatus}
+                        </Badge>
                       </div>
                     )}
+
                     <div ref={bottomRef} />
                   </div>
                   </ScrollArea>
@@ -244,34 +377,6 @@ export default function NADOAssistant() {
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* Quick Actions */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Lightbulb className="h-5 w-5" />
-                  Quick Actions
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {quickActions.map((action) => (
-                  <Button
-                    key={action.id}
-                    variant="outline"
-                    className="w-full justify-start h-auto p-3"
-                    onClick={() => handleQuickAction(action.id)}
-                  >
-                    <div className={`p-2 rounded-lg ${action.color} text-white mr-3`}>
-                      <action.icon className="h-4 w-4" />
-                    </div>
-                    <div className="text-left">
-                      <div className="font-medium text-sm">{action.title}</div>
-                      <div className="text-xs text-muted-foreground">{action.description}</div>
-                    </div>
-                  </Button>
-                ))}
-              </CardContent>
-            </Card>
-
             {/* Suggested Questions */}
             <Card>
               <CardHeader>

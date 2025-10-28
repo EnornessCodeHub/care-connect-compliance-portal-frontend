@@ -13,7 +13,6 @@ import {
   Smile,
   Mic,
   MicOff,
-  Settings,
   Bell,
   BellOff,
   Archive,
@@ -234,10 +233,6 @@ export default function InternalChat() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="outline">
-              <Settings className="h-4 w-4 mr-2" />
-              Settings
-            </Button>
             <Button>
               <MessageSquare className="h-4 w-4 mr-2" />
               New Chat
