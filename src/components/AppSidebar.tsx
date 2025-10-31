@@ -68,7 +68,7 @@ const menuItems = [
   },
   {
     title: "Staff Management",
-    url: "/team",
+    url: "/staff",
     icon: Users,
   },
   {
@@ -97,10 +97,9 @@ const menuItems = [
     title: "Training & Courses",
     icon: GraduationCap,
     items: [
-      { title: "My Courses", url: "/training" },
-      { title: "Progress Dashboard", url: "/training/progress" },
-      { title: "Certificates", url: "/training/certificates" },
-      { title: "Course Library", url: "/training/library" },
+      { title: "My Courses", url: "/course" },
+      { title: "Progress Dashboard", url: "/course/progress" },
+      { title: "Certificates", url: "/course/certificates" },
     ],
   },
   {

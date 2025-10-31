@@ -1,24 +1,20 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { addFile, createFolder, getFolder, listFiles, listFolders, loadDocState, saveDocState, updateFolderShare, renameFolder, deleteFolder } from "@/lib/docCenter";
-import { FolderPlus, Upload, UploadCloud, Share2, ArrowLeft, Download, MoreVertical } from "lucide-react";
+import { FolderPlus, Upload, UploadCloud, Share2, ArrowLeft, Download, MoreVertical, Loader2, X } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-
-type ShareTarget = { id: string; name: string };
-
-const MOCK_STAFF: ShareTarget[] = [
-  { id: "s1", name: "Jane Smith" },
-  { id: "s2", name: "John Doe" },
-  { id: "s3", name: "Alex Johnson" },
-];
+import staffService, { Staff } from "@/services/staffService";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Documents() {
+  const { toast } = useToast();
   const [state, setState] = useState(() => loadDocState());
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -36,8 +32,10 @@ export default function Documents() {
 
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [shareTab, setShareTab] = useState<"internal" | "external">("internal");
-  const [internal, setInternal] = useState<string[]>([]);
+  const [internal, setInternal] = useState<number[]>([]);
   const [external, setExternal] = useState<string[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(false);
 
   // folder actions
   const [folderMenuOpenId, setFolderMenuOpenId] = useState<string | null>(null);
@@ -51,6 +49,44 @@ export default function Documents() {
 
   const filteredFolders = folders.filter(f => f.name.toLowerCase().includes(query.toLowerCase()));
   const filteredFiles = files.filter(f => f.name.toLowerCase().includes(query.toLowerCase()));
+
+  // Load staff list when share dialog opens
+  useEffect(() => {
+    if (isShareOpen && shareTab === "internal" && staffList.length === 0) {
+      loadStaffList();
+    }
+  }, [isShareOpen, shareTab]);
+
+  const loadStaffList = async () => {
+    try {
+      setLoadingStaff(true);
+      const response = await staffService.listStaff();
+      if (response.success && response.data) {
+        setStaffList(response.data);
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to load staff list"
+      });
+    } finally {
+      setLoadingStaff(false);
+    }
+  };
+
+  const toggleStaff = (staffId: number) => {
+    setInternal(prev => prev.includes(staffId) ? prev.filter(id => id !== staffId) : [...prev, staffId]);
+  };
+
+  const getSelectedStaffLabel = () => {
+    if (internal.length === 0) return 'Select staff members';
+    if (internal.length === 1) {
+      const staff = staffList.find(s => s.id === internal[0]);
+      return staff?.fullname || staff?.username || '1 staff member';
+    }
+    return `${internal.length} staff members selected`;
+  };
 
   const openCreate = () => { setNewFolderName(""); setIsCreateOpen(true); };
   const create = () => {
@@ -72,7 +108,9 @@ export default function Documents() {
 
   const openShare = () => {
     const f = currentFolderId ? getFolder(currentFolderId, state) : undefined;
-    setInternal(f?.shared.internal ?? []);
+    // Convert stored internal IDs to numbers if they're strings
+    const internalIds = f?.shared.internal ?? [];
+    setInternal(Array.isArray(internalIds) ? internalIds.map(id => typeof id === 'string' ? parseInt(id, 10) : id).filter(id => !isNaN(id)) : []);
     setExternal(f?.shared.external ?? []);
     setIsShareOpen(true);
   };
@@ -185,10 +223,6 @@ export default function Documents() {
               <Label>File Name</Label>
               <Input value={fileName} onChange={(e) => setFileName(e.target.value)} placeholder="Enter file name" />
             </div>
-            <div className="space-y-2">
-              <Label>Size (KB)</Label>
-              <Input type="number" value={Math.round(fileSize / 1024)} onChange={(e) => setFileSize(Number(e.target.value) * 1024)} placeholder="e.g. 120" />
-            </div>
             <div
               onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
               onDragLeave={() => setDragActive(false)}
@@ -248,14 +282,70 @@ export default function Documents() {
             {shareTab === 'internal' ? (
               <div className="space-y-2">
                 <Label>Select internal staff</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {MOCK_STAFF.map(s => (
-                    <label key={s.id} className={cn('border rounded-md px-3 py-2 cursor-pointer', internal.includes(s.id) && 'bg-primary/10 border-primary')}> 
-                      <input type="checkbox" className="mr-2" checked={internal.includes(s.id)} onChange={() => setInternal(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])} />
-                      {s.name}
-                    </label>
-                  ))}
-                </div>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="justify-between w-full" disabled={loadingStaff}>
+                      {loadingStaff ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Loading staff...
+                        </>
+                      ) : (
+                        getSelectedStaffLabel()
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-80">
+                    {loadingStaff ? (
+                      <div className="py-8 text-center text-muted-foreground">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                        Loading staff...
+                      </div>
+                    ) : staffList.length === 0 ? (
+                      <div className="py-8 text-center text-muted-foreground">
+                        No staff members found
+                      </div>
+                    ) : (
+                      <>
+                        <div className="max-h-64 overflow-auto pr-1">
+                          {staffList.map(staff => {
+                            const active = internal.includes(staff.id);
+                            return (
+                              <button
+                                key={staff.id}
+                                type="button"
+                                onClick={() => toggleStaff(staff.id)}
+                                className={cn(
+                                  'w-full text-left px-3 py-2 rounded-md hover:bg-muted',
+                                  active && 'bg-primary/10'
+                                )}
+                              >
+                                <div className="font-medium">{staff.fullname || staff.username}</div>
+                                <div className="text-xs text-muted-foreground">{staff.email}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {internal.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t">
+                            {internal.map(id => {
+                              const staff = staffList.find(s => s.id === id);
+                              if (!staff) return null;
+                              return (
+                                <span key={id} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">
+                                  {staff.fullname || staff.username}
+                                  <button className="hover:text-destructive" onClick={() => toggleStaff(id)}>
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </PopoverContent>
+                </Popover>
               </div>
             ) : (
               <div className="space-y-2">

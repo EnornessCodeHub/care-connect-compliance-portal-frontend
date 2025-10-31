@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,9 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Search, 
   ChevronLeft,
@@ -16,65 +14,144 @@ import {
   Pencil,
   Trash2,
   Eye,
-  EyeOff
+  EyeOff,
+  Loader2
 } from "lucide-react";
-import { format } from "date-fns";
-import { useNavigate } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import staffService, { Staff as StaffType } from "@/services/staffService";
 
-const Team = () => {
-  const navigate = useNavigate();
+const Staff = () => {
+  const { toast } = useToast();
   const [isNewStaffDialogOpen, setIsNewStaffDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [recordsPerPage, setRecordsPerPage] = useState("25");
+  const [staffMembers, setStaffMembers] = useState<StaffType[]>([]);
+  const [loading, setLoading] = useState(true);
   
-  // Mock staff data (stateful for edits)
-  const [staffMembers, setStaffMembers] = useState([
-    {
-      id: "1",
-      name: "Marko Bajic",
-      username: "marko.bajic",
-      email: "markobajic@live.com.au",
-      active: true
-    }
-  ] as Array<{ id: string; name: string; username: string; email: string; active: boolean }>);
-
   // Edit dialog state
-  const [editId, setEditId] = useState<string>("");
+  const [editId, setEditId] = useState<number>(0);
   const [editName, setEditName] = useState("");
   const [editUsername, setEditUsername] = useState("");
   const [editEmail, setEditEmail] = useState("");
-  const [editPassword, setEditPassword] = useState(""); // optional
+  const [editPassword, setEditPassword] = useState("");
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [editSubmitted, setEditSubmitted] = useState(false);
 
-  const openEdit = (id: string) => {
-    const s = staffMembers.find((m) => m.id === id);
-    if (!s) return;
-    setEditId(s.id);
-    setEditName(s.name);
-    setEditUsername(s.username);
-    setEditEmail(s.email);
+  // Load staff on mount
+  useEffect(() => {
+    loadStaff();
+  }, []);
+
+  const loadStaff = async () => {
+    try {
+      setLoading(true);
+      const response = await staffService.listStaff();
+      if (response.success && response.data) {
+        setStaffMembers(response.data);
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to load staff members"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openEdit = (id: number) => {
+    const staff = staffMembers.find((m) => m.id === id);
+    if (!staff) return;
+    setEditId(staff.id);
+    setEditName(staff.fullname || "");
+    setEditUsername(staff.username);
+    setEditEmail(staff.email);
     setEditSubmitted(false);
     setEditPassword("");
     setIsEditDialogOpen(true);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     setEditSubmitted(true);
     if (!editName.trim() || !editUsername.trim() || !editEmail.trim()) return;
-    setStaffMembers((prev) => prev.map((m) => (m.id === editId ? { ...m, name: editName, username: editUsername, email: editEmail } : m)));
-    setIsEditDialogOpen(false);
+
+    try {
+      const updateData: any = {
+        fullname: editName,
+        username: editUsername,
+        email: editEmail,
+      };
+      
+      // Only include password if it's provided
+      if (editPassword.trim()) {
+        updateData.password = editPassword;
+      }
+
+      const response = await staffService.updateStaff(editId, updateData);
+      
+      if (response.success) {
+        toast({
+          title: "Success",
+          description: "Staff member updated successfully"
+        });
+        setIsEditDialogOpen(false);
+        loadStaff(); // Reload the list
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to update staff member"
+      });
+    }
   };
 
-  const toggleActive = (id: string, value: boolean) => {
-    setStaffMembers((prev) => prev.map((m) => (m.id === id ? { ...m, active: value } : m)));
+  const toggleActive = async (id: number, currentStatus: boolean) => {
+    try {
+      const response = await staffService.toggleStaffStatus(id);
+      if (response.success) {
+        toast({
+          title: "Success",
+          description: response.message
+        });
+        loadStaff(); // Reload to get updated status
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to toggle staff status"
+      });
+    }
   };
 
-  // simplified actions can be wired later
+  const handleDelete = async (id: number) => {
+    if (!confirm("Are you sure you want to delete this staff member?")) return;
 
-  // removed onboarding icons in simplified flow
+    try {
+      const response = await staffService.deleteStaff(id);
+      if (response.success) {
+        toast({
+          title: "Success",
+          description: "Staff member deleted successfully"
+        });
+        loadStaff(); // Reload the list
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to delete staff member"
+      });
+    }
+  };
+
+  const filteredStaff = staffMembers.filter(staff => 
+    staff.fullname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    staff.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    staff.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -97,7 +174,10 @@ const Team = () => {
                 </div>
               </div>
             </DialogHeader>
-            <NewStaffForm onClose={() => setIsNewStaffDialogOpen(false)} />
+            <NewStaffForm 
+              onClose={() => setIsNewStaffDialogOpen(false)} 
+              onSuccess={loadStaff}
+            />
           </DialogContent>
         </Dialog>
       </div>
@@ -128,25 +208,46 @@ const Team = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {staffMembers.map((staff) => (
-              <TableRow key={staff.id}>
-                <TableCell>{staff.name}</TableCell>
-                <TableCell>{staff.username}</TableCell>
-                <TableCell>{staff.email}</TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <Switch checked={staff.active} onCheckedChange={(v) => toggleActive(staff.id, v as boolean)} />
-                    <span className="text-sm">{staff.active ? "Active" : "Inactive"}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="inline-flex items-center gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(staff.id)}><Pencil className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="sm"><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                 </TableCell>
               </TableRow>
-            ))}
+            ) : filteredStaff.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  No staff members found
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredStaff.map((staff) => (
+                <TableRow key={staff.id}>
+                  <TableCell>{staff.fullname || '-'}</TableCell>
+                  <TableCell>{staff.username}</TableCell>
+                  <TableCell>{staff.email}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Switch 
+                        checked={staff.status} 
+                        onCheckedChange={() => toggleActive(staff.id, staff.status)}
+                      />
+                      <span className="text-sm">{staff.status ? "Active" : "Inactive"}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="inline-flex items-center gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(staff.id)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleDelete(staff.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
@@ -194,7 +295,7 @@ const Team = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <span className="text-sm text-muted-foreground">
-            Showing 1 of 1 items
+            Showing {filteredStaff.length} of {staffMembers.length} items
           </span>
           <Select value={recordsPerPage} onValueChange={setRecordsPerPage}>
             <SelectTrigger className="w-16">
@@ -223,29 +324,55 @@ const Team = () => {
   );
 };
 
-// New Employee Form Component (simplified to 4 fields)
-const NewStaffForm = ({ onClose }: { onClose: () => void }) => {
+// New Employee Form Component
+const NewStaffForm = ({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) => {
+  const { toast } = useToast();
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
+    
     if (!fullName.trim() || !username.trim() || !email.trim() || !password.trim()) return;
-    console.log({ fullName, username, email, password });
-    onClose();
+
+    try {
+      setLoading(true);
+      const response = await staffService.createStaff({
+        fullname: fullName,
+        username,
+        email,
+        password,
+      });
+
+      if (response.success) {
+        toast({
+          title: "Success",
+          description: "Staff member created successfully"
+        });
+        onClose();
+        onSuccess(); // Reload the staff list
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to create staff member"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const errorClass = "text-xs text-destructive mt-1";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <DialogTitle className="sr-only">Add Staff Member</DialogTitle>
-
       <div className="space-y-4">
         <div className="space-y-2">
           <Label>Full Name *</Label>
@@ -253,9 +380,10 @@ const NewStaffForm = ({ onClose }: { onClose: () => void }) => {
             placeholder="Enter staff name"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
+            disabled={loading}
           />
+          {submitted && !fullName.trim() && <p className={errorClass}>Please enter full name</p>}
         </div>
-        {submitted && !fullName.trim() && <p className={errorClass}>Please enter full name</p>}
 
         <div className="space-y-2">
           <Label>Username *</Label>
@@ -263,9 +391,10 @@ const NewStaffForm = ({ onClose }: { onClose: () => void }) => {
             placeholder="Enter username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
+            disabled={loading}
           />
+          {submitted && !username.trim() && <p className={errorClass}>Please enter username</p>}
         </div>
-        {submitted && !username.trim() && <p className={errorClass}>Please enter username</p>}
 
         <div className="space-y-2">
           <Label>Email *</Label>
@@ -274,9 +403,10 @@ const NewStaffForm = ({ onClose }: { onClose: () => void }) => {
             placeholder="Enter email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            disabled={loading}
           />
+          {submitted && !email.trim() && <p className={errorClass}>Please enter email</p>}
         </div>
-        {submitted && !email.trim() && <p className={errorClass}>Please enter email</p>}
 
         <div className="space-y-2">
           <Label>Password *</Label>
@@ -287,21 +417,39 @@ const NewStaffForm = ({ onClose }: { onClose: () => void }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="pr-10"
+              disabled={loading}
             />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+            <button 
+              type="button" 
+              onClick={() => setShowPassword(!showPassword)} 
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              disabled={loading}
+            >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
+          {submitted && !password.trim() && <p className={errorClass}>Please enter password</p>}
         </div>
-        {submitted && !password.trim() && <p className={errorClass}>Please enter password</p>}
       </div>
 
       <div className="flex justify-end space-x-2 pt-6 border-t">
-        <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-        <Button type="submit" className="bg-blue-500 hover:bg-blue-600">Add Staff</Button>
+        <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>
+        <Button type="submit" className="bg-blue-500 hover:bg-blue-600" disabled={loading}>
+          {loading ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Adding...
+            </>
+          ) : (
+            "Add Staff"
+          )}
+        </Button>
       </div>
     </form>
   );
 };
 
-export default Team;
+export default Staff;
+

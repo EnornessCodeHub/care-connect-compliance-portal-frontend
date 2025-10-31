@@ -42,7 +42,7 @@ const coreModules = [
     id: 'staff',
     title: 'Staff',
     description: 'Team management',
-    url: '/team',
+    url: '/staff',
     icon: Users,
     color: 'bg-green-500',
     hasPermission: (hasPermission: (resource: string, action: string) => boolean) => 
@@ -74,7 +74,7 @@ const additionalModules = [
     id: 'training',
     title: 'Training',
     description: 'Courses and certifications',
-    url: '/training',
+    url: '/course',
     icon: GraduationCap,
     color: 'bg-emerald-500',
     hasPermission: (hasPermission: (resource: string, action: string) => boolean) => 

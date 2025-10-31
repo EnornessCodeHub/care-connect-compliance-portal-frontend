@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
       dedupe: ["react", "react-dom"],
     },
     define: {
-      'import.meta.env.VITE_BASE_URL': JSON.stringify(env.BASE_URL),
+      'import.meta.env.VITE_BASE_URL': JSON.stringify(env.VITE_BASE_URL),
     },
   };
 });

@@ -12,6 +12,8 @@ interface UserContextType {
   markNotificationAsRead: (notificationId: string) => void;
   markTaskAsComplete: (taskId: string) => void;
   refreshData: () => void;
+  login: (username: string, role: string) => void;
+  logout: () => void;
   isLoading: boolean;
 }
 
@@ -124,7 +126,7 @@ const mockProfile: UserProfile = {
   quickLinks: [
     { id: '1', title: 'Portal', url: '/', icon: 'LayoutDashboard', order: 1, isVisible: true },
     { id: '2', title: 'NADO', url: '/nado', icon: 'Bot', order: 2, isVisible: true },
-    { id: '3', title: 'Staff', url: '/team', icon: 'Users', order: 3, isVisible: true },
+    { id: '3', title: 'Staff', url: '/staff', icon: 'Users', order: 3, isVisible: true },
     { id: '4', title: 'Notifications', url: '/notifications', icon: 'Bell', order: 4, isVisible: true }
   ]
 };
@@ -151,7 +153,7 @@ const mockNotifications: Notification[] = [
     isRead: false,
     userId: '1',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-    actionUrl: '/training',
+    actionUrl: '/course',
     actionText: 'Start Training'
   },
   {
@@ -219,16 +221,64 @@ export function UserProvider({ children }: UserProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate loading user data
+    // Load real user data from localStorage
     const loadUserData = async () => {
       setIsLoading(true);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      setUser(mockUser);
-      setProfile(mockProfile);
-      setNotifications(mockNotifications);
-      setPendingTasks(mockPendingTasks);
+      try {
+        // Get user data from localStorage (stored by authService after login)
+        const storedUserData = localStorage.getItem('user_data');
+        
+        if (storedUserData) {
+          const userData = JSON.parse(storedUserData);
+          
+          // Map backend user data to our User type
+          const mappedUser: User = {
+            id: userData.id.toString(),
+            email: userData.email,
+            firstName: userData.fullname?.split(' ')[0] || userData.username,
+            lastName: userData.fullname?.split(' ').slice(1).join(' ') || '',
+            role: {
+              id: userData.role,
+              name: userData.role === 'admin' ? 'Administrator' : 'Staff',
+              description: userData.role === 'admin' ? 'Full system access' : 'Staff access',
+              permissions: [],
+              level: userData.role === 'admin' ? 10 : 5
+            },
+            avatar: userData.profile_img || '/avatars/default.jpg',
+            department: 'Management',
+            permissions: mockUser.permissions, // Use default permissions for now
+            lastLogin: new Date(),
+            isActive: userData.status,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+
+          // Create profile with real user data
+          const mappedProfile: UserProfile = {
+            ...mockProfile,
+            user: mappedUser
+          };
+
+          setUser(mappedUser);
+          setProfile(mappedProfile);
+        } else {
+          // No user data found, use mock data as fallback
+          setUser(mockUser);
+          setProfile(mockProfile);
+        }
+        
+        setNotifications(mockNotifications);
+        setPendingTasks(mockPendingTasks);
+      } catch (error) {
+        console.error('Error loading user data:', error);
+        // Fallback to mock data on error
+        setUser(mockUser);
+        setProfile(mockProfile);
+        setNotifications(mockNotifications);
+        setPendingTasks(mockPendingTasks);
+      }
+      
       setIsLoading(false);
     };
 
@@ -281,6 +331,22 @@ export function UserProvider({ children }: UserProviderProps) {
     setPendingTasks(mockPendingTasks);
   };
 
+  const login = (username: string, role: string) => {
+    // Set user data from auth
+    setUser(mockUser);
+    setProfile(mockProfile);
+    setNotifications(mockNotifications);
+    setPendingTasks(mockPendingTasks);
+  };
+
+  const logout = () => {
+    // Clear all user data
+    setUser(null);
+    setProfile(null);
+    setNotifications([]);
+    setPendingTasks([]);
+  };
+
   const value: UserContextType = {
     user,
     profile,
@@ -292,6 +358,8 @@ export function UserProvider({ children }: UserProviderProps) {
     markNotificationAsRead,
     markTaskAsComplete,
     refreshData,
+    login,
+    logout,
     isLoading
   };
 

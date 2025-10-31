@@ -14,15 +14,37 @@ import {
   Phone
 } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
+import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
+import authService from '@/services/authService';
+import { useToast } from '@/hooks/use-toast';
 
 export function UserProfileCard() {
-  const { user, profile, notifications, pendingTasks } = useUser();
+  const { user, profile, notifications, pendingTasks, logout: contextLogout } = useUser();
+  const navigate = useNavigate();
+  const { toast } = useToast();
 
   if (!user || !profile) return null;
 
   const unreadNotifications = notifications.filter(n => !n.isRead).length;
   const urgentTasks = pendingTasks.filter(t => t.priority === 'urgent' || t.priority === 'high').length;
+
+  const handleLogout = () => {
+    // Clear auth token and user data
+    authService.logout();
+    
+    // Clear user context
+    contextLogout();
+    
+    // Show success message
+    toast({
+      title: "Logged Out",
+      description: "You have been successfully logged out.",
+    });
+    
+    // Redirect to login
+    navigate('/login');
+  };
 
   return (
     <Card className="w-full max-w-md bg-gradient-to-br from-card via-card/95 to-card/80 backdrop-blur-sm border border-white/10 shadow-lg">
@@ -105,7 +127,12 @@ export function UserProfileCard() {
             <User className="h-4 w-4 mr-2" />
             Profile
           </Button>
-          <Button variant="outline" size="sm">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleLogout}
+            title="Logout"
+          >
             <LogOut className="h-4 w-4" />
           </Button>
         </div>

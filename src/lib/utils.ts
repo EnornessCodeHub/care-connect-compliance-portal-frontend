@@ -68,3 +68,56 @@ export function deleteCourse(courseId: string) {
 export function generateId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`;
 }
+
+// ===== Certificate models and storage helpers =====
+export type Certificate = {
+  id: string;
+  courseId: string;
+  courseName: string;
+  userId: string;
+  userName: string;
+  userFullName: string;
+  issuedAt: string;
+  certificateNumber: string;
+};
+
+const CERTIFICATE_STORAGE_KEY = "cc_certificates_v1";
+
+export function loadCertificates(): Certificate[] {
+  try {
+    const raw = localStorage.getItem(CERTIFICATE_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as Certificate[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCertificates(certificates: Certificate[]) {
+  localStorage.setItem(CERTIFICATE_STORAGE_KEY, JSON.stringify(certificates));
+}
+
+export function addCertificate(certificate: Certificate) {
+  const list = loadCertificates();
+  // Check if certificate already exists for this user and course
+  const exists = list.some(c => c.userId === certificate.userId && c.courseId === certificate.courseId);
+  if (!exists) {
+    list.push(certificate);
+    saveCertificates(list);
+  }
+}
+
+export function getUserCertificates(userId: string): Certificate[] {
+  return loadCertificates().filter(c => c.userId === userId);
+}
+
+export function getCourseCertificates(courseId: string): Certificate[] {
+  return loadCertificates().filter(c => c.courseId === courseId);
+}
+
+export function generateCertificateNumber(): string {
+  const prefix = 'CERT';
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${prefix}-${timestamp}-${random}`;
+}

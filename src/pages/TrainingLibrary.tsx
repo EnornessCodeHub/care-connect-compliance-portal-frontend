@@ -9,7 +9,7 @@ const TrainingLibrary = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Course Library</h1>
         <Button asChild variant="outline">
-          <Link to="/training/create">Add Course</Link>
+          <Link to="/course/create">Add Course</Link>
         </Button>
       </div>
       <Card>
