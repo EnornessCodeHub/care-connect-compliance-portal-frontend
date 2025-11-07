@@ -12,6 +12,7 @@ import { Search, Plus, X, Loader2, RefreshCw } from 'lucide-react';
 import staffService, { Staff } from '@/services/staffService';
 import notificationService, { NotificationItem } from '@/services/notificationService';
 import { useToast } from '@/hooks/use-toast';
+import authService from '@/services/authService';
 
 const Notifications = () => {
   const { toast } = useToast();
@@ -144,6 +145,8 @@ const Notifications = () => {
     return `${selectedUsers.length} users selected`;
   };
 
+  const isAdmin = authService.isAdmin();
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -152,9 +155,11 @@ const Notifications = () => {
           <Button variant="outline" size="sm" onClick={loadNotifications} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
-          <Button onClick={() => setIsOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" /> Add Notification
-          </Button>
+          {isAdmin && (
+            <Button onClick={() => setIsOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" /> Add Notification
+            </Button>
+          )}
         </div>
       </div>
 

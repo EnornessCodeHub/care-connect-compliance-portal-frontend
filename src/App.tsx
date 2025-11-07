@@ -1,11 +1,13 @@
+import React from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Outlet, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { UserProvider } from "@/contexts/UserContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import authService from '@/services/authService';
 
 // Pages
 import Index from "./pages/Index";
@@ -58,6 +60,9 @@ import ForgotPassword from "./pages/ForgotPassword";
 import OTPVerification from "./pages/OTPVerification";
 import ResetPassword from "./pages/ResetPassword";
 
+// Public Share
+import PublicShare from "./pages/PublicShare";
+
 const queryClient = new QueryClient();
 
 const AppShell = () => (
@@ -65,6 +70,14 @@ const AppShell = () => (
     <Outlet />
   </AppLayout>
 );
+
+// Protected route component for admin-only routes
+const AdminRoute = ({ children }: { children: React.ReactElement }) => {
+  if (authService.isAdmin()) {
+    return children;
+  }
+  return <Navigate to="/course" replace />;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -79,6 +92,7 @@ const App = () => (
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/verify-otp" element={<OTPVerification />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/share/:token" element={<PublicShare />} />
 
             {/* Protected Routes - Shell for app */}
             <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
@@ -102,7 +116,14 @@ const App = () => (
 
               {/* Training & Courses */}
               <Route path="/course" element={<Training />} />
-              <Route path="/course/progress" element={<TrainingProgress />} />
+              <Route 
+                path="/course/progress" 
+                element={
+                  <AdminRoute>
+                    <TrainingProgress />
+                  </AdminRoute>
+                } 
+              />
               <Route path="/course/certificates" element={<TrainingCertificates />} />
               <Route path="/course/library" element={<TrainingLibrary />} />
               <Route path="/course/manage" element={<CourseManage />} />

@@ -49,6 +49,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import authService from '@/services/authService';
 
 const menuItems = [
   {
@@ -130,6 +131,7 @@ export function AppSidebar() {
   const currentPath = location.pathname;
   const [openGroups, setOpenGroups] = useState<string[]>([]);
   const collapsed = state === "collapsed";
+  const isAdmin = authService.isAdmin();
 
   const isActive = (path: string) => currentPath === path;
   const isGroupActive = (items: { url: string }[]) => 
@@ -153,6 +155,27 @@ export function AppSidebar() {
       ? "bg-gradient-to-r from-primary/10 to-transparent text-primary font-medium"
       : "text-foreground/80 hover:text-foreground hover:bg-gradient-to-r hover:from-primary/5 hover:to-transparent transition-all duration-200 ease-in-out";
 
+  // Filter menu items based on role
+  const filteredMenuItems = menuItems.filter(item => {
+    if (!isAdmin) {
+      // Hide Staff Management for staff
+      if (item.title === "Staff Management") return false;
+      
+      // Hide Notifications for staff
+      if (item.title === "Notifications") return false;
+    }
+    return true;
+  }).map(item => {
+    // Filter submenu items for Training & Courses
+    if (item.title === "Training & Courses" && item.items && !isAdmin) {
+      return {
+        ...item,
+        items: item.items.filter(subItem => subItem.title !== "Progress Dashboard")
+      };
+    }
+    return item;
+  });
+
   return (
     <Sidebar 
       className={`${collapsed ? "w-14" : "w-64"} border-r border-border/50 bg-gradient-to-b from-background to-background/95 backdrop-blur-sm`} 
@@ -168,7 +191,7 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="space-y-1">
-              {menuItems.map((item, index) => (
+              {filteredMenuItems.map((item, index) => (
                 <SidebarMenuItem 
                   key={item.title}
                   className="animate-fade-in"

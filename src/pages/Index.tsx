@@ -49,8 +49,9 @@ const Index = () => {
       const response = await staffService.listStaff();
       if (response.success && response.data) {
         const total = response.data.length;
-        const active = response.data.filter(staff => staff.status === 'Active').length;
-        const inactive = total - active;
+        // Status is a boolean: true = active, false = inactive
+        const active = response.data.filter(staff => staff.status === true).length;
+        const inactive = response.data.filter(staff => staff.status === false).length;
         
         setStaffStats({
           total,
@@ -143,7 +144,7 @@ const Index = () => {
           <p className="text-muted-foreground">
             Here's what's happening with your portal today.
           </p>
-        </div>
+      </div>
 
         {/* Staff Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -185,7 +186,7 @@ const Index = () => {
               </p>
             </CardContent>
           </Card>
-        </div>
+      </div>
 
         {/* Quick Links */}
         <Card>

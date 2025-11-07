@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import courseService from '@/services/courseService';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import authService from '@/services/authService';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -76,13 +77,17 @@ export default function CourseManage() {
     }
   };
 
+  const isAdmin = authService.isAdmin();
+
   return (
     <div className="container mx-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Course Management</h1>
-        <Button asChild>
-          <Link to="/course/create">Add Course</Link>
-        </Button>
+        {isAdmin && (
+          <Button asChild>
+            <Link to="/course/create">Add Course</Link>
+          </Button>
+        )}
       </div>
 
       <Card>

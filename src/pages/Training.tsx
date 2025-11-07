@@ -42,18 +42,22 @@ const Training = () => {
     }
   };
 
+  const isAdmin = authService.isAdmin();
+
   return (
     <div className="container mx-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Courses</h1>
-        <div className="flex gap-2">
-          <Button asChild>
-            <Link to="/course/manage">Manage Courses</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/course/create">Add Course</Link>
-          </Button>
-        </div>
+        {isAdmin && (
+          <div className="flex gap-2">
+            <Button asChild>
+              <Link to="/course/manage">Manage Courses</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/course/create">Add Course</Link>
+            </Button>
+          </div>
+        )}
       </div>
 
       {loading ? (

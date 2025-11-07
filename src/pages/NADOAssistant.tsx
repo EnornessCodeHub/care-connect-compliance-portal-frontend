@@ -10,11 +10,23 @@ import {
   Send, 
   MessageSquare,
   AlertCircle,
-  Loader2
+  Loader2,
+  Eye,
+  Download,
+  FileText
 } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import { useToast } from '@/hooks/use-toast';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+
+interface Citation {
+  documentId: string;
+  displayName: string;
+  category: string;
+  filePath: string;
+  fileType: string;
+  similarity: number;
+}
 
 interface ChatMessage {
   id: string;
@@ -24,6 +36,7 @@ interface ChatMessage {
   category?: string;
   isStreaming?: boolean;
   disclaimer?: string;
+  citations?: Citation[];
 }
 
 // Quick links removed
@@ -82,7 +95,7 @@ export default function NADOAssistant() {
         content: msg.content
       }));
 
-      const response = await fetch(`${import.meta.env.VITE_BASE_URL}/chat/stream`, {
+      const response = await fetch(`${import.meta.env.VITE_BASE_URL}/bot/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,6 +121,8 @@ export default function NADOAssistant() {
       let streamingMessageId = (Date.now() + 1).toString();
       let accumulatedContent = '';
       let messageDisclaimer = '';
+      let messageCitations: Citation[] = [];
+      let currentEvent = '';
 
       // Create initial streaming message
       const initialMessage: ChatMessage = {
@@ -132,7 +147,7 @@ export default function NADOAssistant() {
           if (!line.trim()) continue;
 
           if (line.startsWith('event:')) {
-            const eventType = line.substring(6).trim();
+            currentEvent = line.substring(6).trim();
             continue;
           }
 
@@ -145,7 +160,12 @@ export default function NADOAssistant() {
               setMessages(prev => 
                 prev.map(msg => 
                   msg.id === streamingMessageId 
-                    ? { ...msg, isStreaming: false, disclaimer: messageDisclaimer || undefined }
+                    ? { 
+                        ...msg, 
+                        isStreaming: false, 
+                        disclaimer: messageDisclaimer || undefined,
+                        citations: messageCitations.length > 0 ? messageCitations : undefined
+                      }
                     : msg
                 )
               );
@@ -154,6 +174,19 @@ export default function NADOAssistant() {
 
             try {
               const data = JSON.parse(dataStr);
+
+              // Handle citations event
+              if (currentEvent === 'citations' && data.citations && Array.isArray(data.citations)) {
+                messageCitations = data.citations;
+                setMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === streamingMessageId 
+                      ? { ...msg, citations: messageCitations }
+                      : msg
+                  )
+                );
+                continue;
+              }
 
               // Handle thinking status
               if (data.status) {
@@ -252,6 +285,44 @@ export default function NADOAssistant() {
     handleSendMessage(question);
   };
 
+  const handleViewCitation = async (filePath: string, fileName: string) => {
+    try {
+      const url = `${import.meta.env.VITE_BASE_URL}/bot/references/view?filePath=${encodeURIComponent(filePath)}`;
+      window.open(url, '_blank');
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to open file"
+      });
+    }
+  };
+
+  const handleDownloadCitation = async (filePath: string, fileName: string) => {
+    try {
+      const url = `${import.meta.env.VITE_BASE_URL}/bot/references/download?filePath=${encodeURIComponent(filePath)}`;
+      
+      // Create a temporary anchor element to trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast({
+        title: "Download Started",
+        description: `Downloading ${fileName}...`
+      });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to download file"
+      });
+    }
+  };
+
   // Auto-scroll to latest message
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -332,6 +403,56 @@ export default function NADOAssistant() {
                           {message.disclaimer && !message.isStreaming && (
                             <div className="text-xs text-muted-foreground bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded p-2">
                               ⚠️ {message.disclaimer}
+                            </div>
+                          )}
+
+                          {/* Citations section */}
+                          {message.citations && message.citations.length > 0 && !message.isStreaming && (
+                            <div className="mt-3 space-y-2">
+                              <div className="text-xs font-medium text-muted-foreground mb-2">References:</div>
+                              <div className="space-y-2">
+                                {message.citations.map((citation, index) => (
+                                  <div
+                                    key={citation.documentId || index}
+                                    className="flex items-center justify-between p-2 bg-background border rounded-md hover:bg-muted/50 transition-colors"
+                                  >
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-medium truncate">{citation.displayName}</div>
+                                        <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                          <Badge variant="outline" className="text-xs">
+                                            {citation.fileType.toUpperCase()}
+                                          </Badge>
+                                          {citation.category && (
+                                            <span className="truncate">{citation.category}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 px-2"
+                                        onClick={() => handleViewCitation(citation.filePath, citation.displayName)}
+                                        title="View file"
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 px-2"
+                                        onClick={() => handleDownloadCitation(citation.filePath, citation.displayName)}
+                                        title="Download file"
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
                         </div>

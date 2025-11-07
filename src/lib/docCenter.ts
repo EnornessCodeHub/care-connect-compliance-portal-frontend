@@ -4,7 +4,12 @@ export type DocFolder = {
   parentId: string | null;
   childFolderIds: string[];
   fileIds: string[];
-  shared: { internal: string[]; external: string[] };
+  shared: { 
+    internal: string[]; 
+    external: string[]; 
+    publicToken?: string; // Unique token for public access
+    publicUrl?: string; // Generated public URL
+  };
   createdAt: string;
 };
 
@@ -14,6 +19,10 @@ export type DocFile = {
   folderId: string;
   size: number;
   createdAt: string;
+  content?: string; // Base64 data URL or file content
+  type?: string; // MIME type
+  publicToken?: string; // Unique token for public access
+  publicUrl?: string; // Generated public URL
 };
 
 export type DocState = {
@@ -100,9 +109,17 @@ export function createFolder(name: string, parentId: string | null, state: DocSt
   return next;
 }
 
-export function addFile(name: string, size: number, folderId: string, state: DocState): DocState {
+export function addFile(name: string, size: number, folderId: string, state: DocState, content?: string, type?: string): DocState {
   const id = `fi_${Date.now()}`;
-  const file: DocFile = { id, name: name.trim(), size, folderId, createdAt: new Date().toISOString() };
+  const file: DocFile = { 
+    id, 
+    name: name.trim(), 
+    size, 
+    folderId, 
+    createdAt: new Date().toISOString(),
+    content,
+    type
+  };
   const next: DocState = {
     ...state,
     files: { ...state.files, [id]: file },
@@ -123,6 +140,9 @@ export function updateFolderShare(
   f.shared = {
     internal: options.internal ?? f.shared.internal,
     external: options.external ?? f.shared.external,
+    // Preserve public sharing data if it exists
+    publicToken: f.shared.publicToken,
+    publicUrl: f.shared.publicUrl,
   };
   next.folders[folderId] = f;
   saveDocState(next);
@@ -173,6 +193,85 @@ export function deleteFolder(folderId: string, state: DocState): DocState {
   };
 
   deleteRecursive(folderId);
+  saveDocState(next);
+  return next;
+}
+
+// Generate unique public token
+export function generatePublicToken(): string {
+  return `pub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Generate public URL
+export function generatePublicUrl(token: string): string {
+  const baseUrl = window.location.origin;
+  return `${baseUrl}/share/${token}`;
+}
+
+// Enable public sharing for folder
+export function enablePublicShare(folderId: string, state: DocState): DocState {
+  const next: DocState = { ...state, folders: { ...state.folders } };
+  const folder = next.folders[folderId];
+  if (!folder) return state;
+  
+  if (!folder.shared.publicToken) {
+    const token = generatePublicToken();
+    folder.shared = {
+      ...folder.shared,
+      publicToken: token,
+      publicUrl: generatePublicUrl(token)
+    };
+  }
+  saveDocState(next);
+  return next;
+}
+
+// Enable public sharing for file
+export function enableFilePublicShare(fileId: string, state: DocState): DocState {
+  const next: DocState = { ...state, files: { ...state.files } };
+  const file = next.files[fileId];
+  if (!file) return state;
+  
+  if (!file.publicToken) {
+    const token = generatePublicToken();
+    file.publicToken = token;
+    file.publicUrl = generatePublicUrl(token);
+  }
+  saveDocState(next);
+  return next;
+}
+
+// Get folder/file by public token
+export function getFolderByPublicToken(token: string, state: DocState): DocFolder | undefined {
+  return Object.values(state.folders).find(f => f.shared.publicToken === token);
+}
+
+export function getFileByPublicToken(token: string, state: DocState): DocFile | undefined {
+  return Object.values(state.files).find(f => f.publicToken === token);
+}
+
+export function renameFile(fileId: string, name: string, state: DocState): DocState {
+  const next: DocState = { ...state, files: { ...state.files } };
+  const f = next.files[fileId];
+  if (!f) return state;
+  next.files[fileId] = { ...f, name: name.trim() };
+  saveDocState(next);
+  return next;
+}
+
+export function deleteFile(fileId: string, state: DocState): DocState {
+  const next: DocState = { ...state, files: { ...state.files }, folders: { ...state.folders } };
+  const file = next.files[fileId];
+  if (!file) return state;
+  
+  // Remove file from folder's fileIds
+  const folder = next.folders[file.folderId];
+  if (folder) {
+    folder.fileIds = folder.fileIds.filter((id) => id !== fileId);
+  }
+  
+  // Delete the file
+  delete next.files[fileId];
   saveDocState(next);
   return next;
 }

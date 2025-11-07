@@ -4,8 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Eye, EyeOff, Camera, X } from "lucide-react";
+import { Eye, EyeOff, Camera, X, Loader2 } from "lucide-react";
 import authService from "@/services/authService";
+import profileService from "@/services/profileService";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Profile() {
@@ -18,24 +19,66 @@ export default function Profile() {
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [currentPwd, setCurrentPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
-  const [show, setShow] = useState<{cur:boolean; new:boolean; conf:boolean}>({cur:false, new:false, conf:false});
+  const [show, setShow] = useState<{new:boolean; conf:boolean}>({new:false, conf:false});
   const [pwdMsg, setPwdMsg] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
-  // Load user data from localStorage
+  // Load user data from API
   useEffect(() => {
-    const userData = authService.getUserData();
-    if (userData) {
-      setFullname(userData.fullname || "");
-      setUsername(userData.username || "");
-      setEmail(userData.email || "");
-      setRole(userData.role || "");
-      setProfileImage(userData.profile_img || null);
-      setImagePreview(userData.profile_img || null);
-    }
+    loadProfile();
   }, []);
+
+  const loadProfile = async () => {
+    try {
+      setLoading(true);
+      const response = await profileService.getProfile();
+      if (response.success && response.data) {
+        const userData = response.data;
+        setFullname(userData.fullname || "");
+        setUsername(userData.username || "");
+        setEmail(userData.email || "");
+        setRole(userData.role || "");
+        setProfileImage(userData.profile_img || null);
+        setImagePreview(userData.profile_img || null);
+        
+        // Update localStorage with latest data
+        const currentUserData = authService.getUserData();
+        if (currentUserData) {
+          const updatedUserData = {
+            ...currentUserData,
+            fullname: userData.fullname,
+            username: userData.username,
+            email: userData.email,
+            profile_img: userData.profile_img
+          };
+          localStorage.setItem('user_data', JSON.stringify(updatedUserData));
+        }
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to load profile"
+      });
+      // Fallback to localStorage if API fails
+      const userData = authService.getUserData();
+      if (userData) {
+        setFullname(userData.fullname || "");
+        setUsername(userData.username || "");
+        setEmail(userData.email || "");
+        setRole(userData.role || "");
+        setProfileImage(userData.profile_img || null);
+        setImagePreview(userData.profile_img || null);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -80,16 +123,29 @@ export default function Profile() {
     if (!imagePreview) return;
 
     try {
-      // TODO: Implement actual API call to upload image
-      // For now, we'll store it in localStorage
-      const userData = authService.getUserData();
-      if (userData) {
-        const updatedUserData = {
-          ...userData,
-          profile_img: imagePreview
-        };
-        localStorage.setItem('user_data', JSON.stringify(updatedUserData));
-        setProfileImage(imagePreview);
+      setUploading(true);
+      
+      // Send base64 image in data URL format (data:image/png;base64,<base64_string>)
+      // Backend expects the full data URL format
+      const response = await profileService.uploadProfileImage(imagePreview);
+      
+      if (response.success && response.data) {
+        // Use the uploaded image path/URL directly from the upload response
+        const uploadedImagePath = response.data;
+        
+        // Update localStorage with the new profile image
+        const currentUserData = authService.getUserData();
+        if (currentUserData) {
+          const updatedUserData = {
+            ...currentUserData,
+            profile_img: uploadedImagePath
+          };
+          localStorage.setItem('user_data', JSON.stringify(updatedUserData));
+        }
+        
+        // Update local state
+        setProfileImage(uploadedImagePath);
+        setImagePreview(uploadedImagePath);
         
         // Dispatch custom event to notify other components
         window.dispatchEvent(new Event('profileUpdated'));
@@ -99,40 +155,65 @@ export default function Profile() {
           description: "Your profile image has been updated successfully.",
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Upload Failed",
-        description: "Failed to update profile image. Please try again.",
+        description: error.message || "Failed to update profile image. Please try again.",
       });
+    } finally {
+      setUploading(false);
     }
   };
 
-  const save = () => {
-    // Save logic here - would typically call an API to update user profile
-    const userData = authService.getUserData();
-    if (userData) {
-      const updatedUserData = {
-        ...userData,
-        fullname,
-        username,
-        email,
-      };
-      localStorage.setItem('user_data', JSON.stringify(updatedUserData));
+  const save = async () => {
+    try {
+      setSaving(true);
+      
+      const response = await profileService.updateProfile({
+        fullname: fullname.trim() || undefined,
+        username: username.trim() || undefined,
+        email: email.trim() || undefined,
+      });
+      
+      if (response.success && response.data) {
+        const updatedData = response.data;
+        
+        // Update localStorage
+        const currentUserData = authService.getUserData();
+        if (currentUserData) {
+          const updatedUserData = {
+            ...currentUserData,
+            fullname: updatedData.fullname,
+            username: updatedData.username,
+            email: updatedData.email,
+          };
+          localStorage.setItem('user_data', JSON.stringify(updatedUserData));
+        }
+        
+        // Dispatch custom event to notify other components
+        window.dispatchEvent(new Event('profileUpdated'));
+        
+        toast({
+          title: "Profile Updated",
+          description: "Your profile has been updated successfully.",
+        });
+        setIsEditing(false);
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Update Failed",
+        description: error.message || "Failed to update profile. Please try again.",
+      });
+    } finally {
+      setSaving(false);
     }
-    
-    toast({
-      title: "Profile Updated",
-      description: "Your profile has been updated successfully.",
-    });
-    setIsEditing(false);
   };
 
-  const handleUpdatePassword = () => {
-    if(!currentPwd) { 
-      setPwdMsg("Current password is required."); 
-      return; 
-    }
+  const handleUpdatePassword = async () => {
+    // Note: Backend API only requires new password, not current password
+    // But we'll still validate on frontend for better UX
     if(!newPwd || newPwd.length<6) { 
       setPwdMsg("Password must be at least 6 characters."); 
       return; 
@@ -143,16 +224,31 @@ export default function Profile() {
     }
     setPwdMsg("");
     
-    // Password update logic here - would typically call an API
-    toast({
-      title: "Password Updated",
-      description: "Your password has been changed successfully.",
-    });
-    
-    // Clear password fields
-    setCurrentPwd("");
-    setNewPwd("");
-    setConfirmPwd("");
+    try {
+      setChangingPassword(true);
+      
+      const response = await profileService.changePassword(newPwd);
+      
+      if (response.success) {
+        toast({
+          title: "Password Updated",
+          description: "Your password has been changed successfully.",
+        });
+        
+        // Clear password fields
+        setNewPwd("");
+        setConfirmPwd("");
+      }
+    } catch (error: any) {
+      setPwdMsg(error.message || "Failed to update password. Please try again.");
+      toast({
+        variant: "destructive",
+        title: "Update Failed",
+        description: error.message || "Failed to update password. Please try again.",
+      });
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   // Format role for display
@@ -163,6 +259,17 @@ export default function Profile() {
   const getRoleBadgeVariant = (role: string): "default" | "secondary" | "destructive" | "outline" => {
     return role === "admin" ? "default" : "secondary";
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
+          <span className="text-muted-foreground">Loading profile...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -225,6 +332,7 @@ export default function Profile() {
                   variant="outline"
                   size="sm"
                   onClick={handleRemoveImage}
+                  disabled={uploading}
                 >
                   <X className="h-4 w-4 mr-1" />
                   Cancel
@@ -233,9 +341,19 @@ export default function Profile() {
                   size="sm"
                   onClick={handleImageUpload}
                   className="bg-blue-600 hover:bg-blue-500"
+                  disabled={uploading}
                 >
-                  <Camera className="h-4 w-4 mr-1" />
-                  Save Image
+                  {uploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="h-4 w-4 mr-1" />
+                      Save Image
+                    </>
+                  )}
                 </Button>
               </div>
             )}
@@ -255,8 +373,17 @@ export default function Profile() {
                   <Button onClick={() => setIsEditing(true)} className="bg-slate-900 text-white hover:bg-slate-800">Edit</Button>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={() => setIsEditing(false)}>Cancel</Button>
-                    <Button onClick={save} className="bg-blue-600 hover:bg-blue-500">Save</Button>
+                    <Button variant="outline" onClick={() => setIsEditing(false)} disabled={saving}>Cancel</Button>
+                    <Button onClick={save} className="bg-blue-600 hover:bg-blue-500" disabled={saving}>
+                      {saving ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save"
+                      )}
+                    </Button>
                   </div>
                 )}
               </div>
@@ -303,16 +430,7 @@ export default function Profile() {
               <CardTitle>Change Password</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <Label>Current Password</Label>
-                  <div className="relative">
-                    <Input type={show.cur?"text":"password"} value={currentPwd} onChange={(e)=>setCurrentPwd(e.target.value)} className="pr-10" />
-                    <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={()=>setShow(s=>({...s,cur:!s.cur}))}>
-                      {show.cur? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
-                    </button>
-                  </div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label>New Password</Label>
                   <div className="relative">
@@ -334,7 +452,16 @@ export default function Profile() {
               </div>
               {pwdMsg && <div className="text-sm text-destructive mt-2">{pwdMsg}</div>}
               <div className="pt-4 flex justify-end">
-                <Button onClick={handleUpdatePassword}>Update Password</Button>
+                <Button onClick={handleUpdatePassword} disabled={changingPassword}>
+                  {changingPassword ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    "Update Password"
+                  )}
+                </Button>
               </div>
             </CardContent>
           </Card>
