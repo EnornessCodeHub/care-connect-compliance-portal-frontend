@@ -15,7 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import authService from "@/services/authService";
 import notificationService, { UserNotification } from "@/services/notificationService";
@@ -27,7 +27,11 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
+  
+  // Hide sidebar on FormBuilder page for full-width view
+  const isFormBuilder = location.pathname === '/forms/create';
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [profileImage, setProfileImage] = useState<string | null>(null);
@@ -113,14 +117,14 @@ export function AppLayout({ children }: AppLayoutProps) {
   };
 
   return (
-    <SidebarProvider defaultOpen={true}>
+    <SidebarProvider defaultOpen={!isFormBuilder}>
       <div className="min-h-screen flex w-full">
-        <AppSidebar />
-        <div className="flex-1 flex flex-col">
+        {!isFormBuilder && <AppSidebar />}
+        <div className="flex-1 flex flex-col w-full">
           <header className="h-14 flex items-center justify-between border-b px-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="flex items-center">
-              <SidebarTrigger className="h-8 w-8" />
-              <div className="ml-4">
+              {!isFormBuilder && <SidebarTrigger className="h-8 w-8" />}
+              <div className={isFormBuilder ? "" : "ml-4"}>
                 <h1 className="text-lg font-semibold">CareConnect</h1>
                 <p className="text-xs text-muted-foreground">By Provider Compliance</p>
               </div>

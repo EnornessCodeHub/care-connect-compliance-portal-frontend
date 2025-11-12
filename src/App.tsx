@@ -45,11 +45,10 @@ import DocumentTemplates from "./pages/DocumentTemplates";
 import DocumentVersions from "./pages/DocumentVersions";
 import ReceivedDocuments from "./pages/ReceivedDocuments";
 
-// Form Builder
+// E-Signature Documents
 import FormBuilder from "./pages/FormBuilder";
 import FormLibrary from "./pages/FormLibrary";
 import FormSignatures from "./pages/FormSignatures";
-import FormWorkflow from "./pages/FormWorkflow";
 
 // Profile
 import Profile from "./pages/Profile";
@@ -76,7 +75,7 @@ const AdminRoute = ({ children }: { children: React.ReactElement }) => {
   if (authService.isAdmin()) {
     return children;
   }
-  return <Navigate to="/course" replace />;
+  return <Navigate to="/" replace />;
 };
 
 const App = () => (
@@ -104,11 +103,25 @@ const App = () => (
               <Route path="/nado" element={<NADOAssistant />} />
 
               {/* Staff Management */}
-              <Route path="/staff" element={<Staff />} />
+              <Route 
+                path="/staff" 
+                element={
+                  <AdminRoute>
+                    <Staff />
+                  </AdminRoute>
+                } 
+              />
               <Route path="/team" element={<Staff />} /> {/* Redirect old route */}
 
               {/* Notifications */}
-              <Route path="/notifications" element={<Notifications />} />
+              <Route 
+                path="/notifications" 
+                element={
+                  <AdminRoute>
+                    <Notifications />
+                  </AdminRoute>
+                } 
+              />
               <Route path="/notifications/view" element={<ViewNotifications />} />
 
               {/* Internal Chat */}
@@ -155,11 +168,18 @@ const App = () => (
               <Route path="/documents/versions" element={<DocumentVersions />} />
               <Route path="/documents/received" element={<ReceivedDocuments />} />
 
-              {/* Form Builder */}
+              {/* E-Signature Documents */}
               <Route path="/forms" element={<FormLibrary />} />
               <Route path="/forms/create" element={<FormBuilder />} />
-              <Route path="/forms/signatures" element={<FormSignatures />} />
-              <Route path="/forms/workflow" element={<FormWorkflow />} />
+              <Route 
+                path="/forms/templates" 
+                element={
+                  <AdminRoute>
+                    <FormSignatures />
+                  </AdminRoute>
+                } 
+              />
+              <Route path="/forms/sign/:id" element={<FormLibrary />} />
 
               {/* Profile */}
               <Route path="/profile" element={<Profile />} />

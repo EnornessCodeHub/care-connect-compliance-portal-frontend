@@ -272,8 +272,8 @@ export default function NADOAssistant() {
       return "The Training & Courses section contains interactive modules covering compliance, safety, and professional development. You can track staff progress, generate certificates upon completion, and assign specific training based on roles and requirements.";
     }
     
-    if (input.includes('form') || input.includes('create')) {
-      return "The Form Builder allows you to create custom forms with drag-and-drop functionality. You can add fields like signatures, dates, text inputs, and checkboxes. Forms can be designated for internal or external use and include secure email workflows for distribution and completion.";
+    if (input.includes('form') || input.includes('create') || input.includes('e-signature') || input.includes('signature') || input.includes('document')) {
+      return "The E-Signature Documents module allows you to upload PDF documents, configure fields using drag-and-drop, and assign them to internal staff or external users for digital signing. You can create reusable templates, track signing progress, and manage completed documents. Internal staff must be authenticated, while external users can sign via unique links without login.";
     }
     
     return "I understand you're asking about: " + userInput + ". Let me help you with that. Could you provide more specific details about what you'd like to know? I can assist with compliance guidance, training support, form creation, staff management, and general portal navigation.";

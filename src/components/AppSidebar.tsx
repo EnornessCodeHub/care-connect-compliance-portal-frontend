@@ -31,6 +31,7 @@ import {
   GraduationCap,
   MessageSquare,
   CheckSquare,
+  PenTool,
   Star
 } from "lucide-react";
 
@@ -109,13 +110,11 @@ const menuItems = [
     icon: FileText,
   },
   {
-    title: "Form Builder",
-    icon: MessageSquare,
+    title: "E-Signature Documents",
+    icon: PenTool,
     items: [
-      { title: "Create Form", url: "/forms/create" },
-      { title: "Form Library", url: "/forms" },
-      { title: "E-Signature", url: "/forms/signatures" },
-      { title: "Workflow", url: "/forms/workflow" },
+      { title: "E-Sign Documents", url: "/forms" },
+      { title: "Templates", url: "/forms/templates" },
     ],
   },
   // trimmed legacy: Incidents
@@ -173,6 +172,16 @@ export function AppSidebar() {
         items: item.items.filter(subItem => subItem.title !== "Progress Dashboard")
       };
     }
+    
+    // Convert E-Signature Documents from dropdown to single link for staff
+    if (item.title === "E-Signature Documents" && !isAdmin) {
+      return {
+        ...item,
+        url: "/forms",
+        items: undefined, // Remove items to make it a single link
+      };
+    }
+    
     return item;
   });
 

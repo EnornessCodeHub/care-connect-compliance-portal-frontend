@@ -22,6 +22,7 @@ const Index = () => {
   const navigate = useNavigate();
   const { user, profile, isLoading: userLoading } = useUser();
   const { toast } = useToast();
+  const isAdmin = authService.isAdmin();
   
   const [loading, setLoading] = useState(true);
   const [fullName, setFullName] = useState("");
@@ -32,9 +33,13 @@ const Index = () => {
   });
 
   useEffect(() => {
-    loadStaffStats();
+    if (isAdmin) {
+      loadStaffStats();
+    } else {
+      setLoading(false);
+    }
     loadUserData();
-  }, []);
+  }, [isAdmin]);
 
   const loadUserData = () => {
     const userData = authService.getUserData();
@@ -83,14 +88,16 @@ const Index = () => {
       description: "Manage staff members and roles",
       icon: Users,
       color: "bg-blue-500",
-      route: "/staff"
+      route: "/staff",
+      adminOnly: true
     },
     {
       title: "Notifications",
       description: "Send and manage notifications",
       icon: Bell,
       color: "bg-orange-500",
-      route: "/notifications"
+      route: "/notifications",
+      adminOnly: true
     },
     {
       title: "Internal Chat",
@@ -114,13 +121,21 @@ const Index = () => {
       route: "/documents"
     },
     {
-      title: "Form Builder",
-      description: "Create and manage forms",
+      title: "E-Signature Documents",
+      description: "Upload, configure, and manage e-signature documents",
       icon: CheckSquare,
       color: "bg-red-500",
       route: "/forms"
     }
   ];
+
+  // Filter quick links based on user role
+  const filteredQuickLinks = quickLinks.filter(link => {
+    if (link.adminOnly && !isAdmin) {
+      return false;
+    }
+    return true;
+  });
 
   if (userLoading || loading) {
     return (
@@ -146,47 +161,49 @@ const Index = () => {
           </p>
       </div>
 
-        {/* Staff Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Staff</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{staffStats.total}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                All staff members
-              </p>
-            </CardContent>
-          </Card>
+        {/* Staff Statistics - Only for Admin */}
+        {isAdmin && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Staff</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{staffStats.total}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  All staff members
+                </p>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Staff</CardTitle>
-              <UserCheck className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{staffStats.active}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Currently active
-              </p>
-            </CardContent>
-          </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Active Staff</CardTitle>
+                <UserCheck className="h-4 w-4 text-green-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">{staffStats.active}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Currently active
+                </p>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Inactive Staff</CardTitle>
-              <UserX className="h-4 w-4 text-red-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">{staffStats.inactive}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Currently inactive
-              </p>
-            </CardContent>
-          </Card>
-      </div>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Inactive Staff</CardTitle>
+                <UserX className="h-4 w-4 text-red-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-600">{staffStats.inactive}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Currently inactive
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Quick Links */}
         <Card>
@@ -195,7 +212,7 @@ const Index = () => {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {quickLinks.map((link) => {
+              {filteredQuickLinks.map((link) => {
                 const IconComponent = link.icon;
                 return (
                   <button

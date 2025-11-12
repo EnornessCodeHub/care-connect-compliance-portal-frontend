@@ -82,8 +82,8 @@ const additionalModules = [
   },
   {
     id: 'forms',
-    title: 'Form Builder',
-    description: 'Create and manage forms',
+    title: 'E-Signature Documents',
+    description: 'Upload, configure, and manage e-signature documents',
     url: '/forms',
     icon: MessageSquare,
     color: 'bg-rose-500',

@@ -157,7 +157,7 @@ const Staff = () => {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Staff</h1>
+        <h1 className="text-2xl font-bold">Staff Management</h1>
         <Dialog open={isNewStaffDialogOpen} onOpenChange={setIsNewStaffDialogOpen}>
           <DialogTrigger asChild>
             <Button className="bg-blue-500 hover:bg-blue-600">
