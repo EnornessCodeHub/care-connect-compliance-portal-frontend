@@ -313,6 +313,20 @@ class ESignatureService {
   }
 
   /**
+   * Submit signed document with filled field values
+   */
+  async submitSignedDocument(
+    documentId: string,
+    fieldValues: Record<string, any>
+  ): Promise<{ success: boolean; message: string; data?: { id: string; status: string; signedFileUrl: string } }> {
+    const response = await api.post<{ success: boolean; message: string; data: { id: string; status: string; signedFileUrl: string } }>(
+      `/e-signature/documents/${documentId}/submit-signed`,
+      { fieldValues }
+    );
+    return response.data;
+  }
+
+  /**
    * Get workflow for a document (placeholder - not in API brief)
    * TODO: Implement when workflow API is available
    */

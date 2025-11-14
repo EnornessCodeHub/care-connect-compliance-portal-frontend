@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { User, UserProfile, UserRole, Permission, Notification, PendingTask } from '@/types/user';
 
 interface UserContextType {
@@ -220,70 +220,109 @@ export function UserProvider({ children }: UserProviderProps) {
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    // Load real user data from localStorage
-    const loadUserData = async () => {
-      setIsLoading(true);
+  // Function to load user data from localStorage
+  const loadUserData = useCallback(async () => {
+    setIsLoading(true);
+    
+    try {
+      // Get user data from localStorage (stored by authService after login)
+      const storedUserData = localStorage.getItem('user_data');
       
-      try {
-        // Get user data from localStorage (stored by authService after login)
-        const storedUserData = localStorage.getItem('user_data');
+      if (storedUserData) {
+        const userData = JSON.parse(storedUserData);
         
-        if (storedUserData) {
-          const userData = JSON.parse(storedUserData);
-          
-          // Map backend user data to our User type
-          const mappedUser: User = {
-            id: userData.id.toString(),
-            email: userData.email,
-            firstName: userData.fullname?.split(' ')[0] || userData.username,
-            lastName: userData.fullname?.split(' ').slice(1).join(' ') || '',
-            role: {
-              id: userData.role,
-              name: userData.role === 'admin' ? 'Administrator' : 'Staff',
-              description: userData.role === 'admin' ? 'Full system access' : 'Staff access',
-              permissions: [],
-              level: userData.role === 'admin' ? 10 : 5
-            },
-            avatar: userData.profile_img || '/avatars/default.jpg',
-            department: 'Management',
-            permissions: mockUser.permissions, // Use default permissions for now
-            lastLogin: new Date(),
-            isActive: userData.status,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          };
-
-          // Create profile with real user data
-          const mappedProfile: UserProfile = {
-            ...mockProfile,
-            user: mappedUser
-          };
-
-          setUser(mappedUser);
-          setProfile(mappedProfile);
-        } else {
-          // No user data found, use mock data as fallback
-          setUser(mockUser);
-          setProfile(mockProfile);
-        }
+        console.log('🔄 Loading user data from localStorage:', userData.id, userData.role);
         
-        setNotifications(mockNotifications);
-        setPendingTasks(mockPendingTasks);
-      } catch (error) {
-        console.error('Error loading user data:', error);
-        // Fallback to mock data on error
-        setUser(mockUser);
-        setProfile(mockProfile);
-        setNotifications(mockNotifications);
-        setPendingTasks(mockPendingTasks);
+        // Map backend user data to our User type
+        const mappedUser: User = {
+          id: userData.id.toString(),
+          email: userData.email,
+          firstName: userData.fullname?.split(' ')[0] || userData.username,
+          lastName: userData.fullname?.split(' ').slice(1).join(' ') || '',
+          role: {
+            id: userData.role,
+            name: userData.role === 'admin' ? 'Administrator' : 'Staff',
+            description: userData.role === 'admin' ? 'Full system access' : 'Staff access',
+            permissions: [],
+            level: userData.role === 'admin' ? 10 : 5
+          },
+          avatar: userData.profile_img || '/avatars/default.jpg',
+          department: 'Management',
+          permissions: mockUser.permissions, // Use default permissions for now
+          lastLogin: new Date(),
+          isActive: userData.status,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+
+        // Create profile with real user data
+        const mappedProfile: UserProfile = {
+          ...mockProfile,
+          user: mappedUser
+        };
+
+        setUser(mappedUser);
+        setProfile(mappedProfile);
+        console.log('✅ User data loaded:', mappedUser.id, mappedUser.role.name);
+      } else {
+        // No user data found, clear user state
+        console.log('⚠️ No user data in localStorage, clearing user state');
+        setUser(null);
+        setProfile(null);
       }
       
-      setIsLoading(false);
+      setNotifications(mockNotifications);
+      setPendingTasks(mockPendingTasks);
+    } catch (error) {
+      console.error('Error loading user data:', error);
+      // Clear user state on error
+      setUser(null);
+      setProfile(null);
+      setNotifications(mockNotifications);
+      setPendingTasks(mockPendingTasks);
+    }
+    
+    setIsLoading(false);
+  }, []);
+
+  // Load user data on mount
+  useEffect(() => {
+    loadUserData();
+  }, [loadUserData]);
+
+  // Listen for storage changes (when user logs in/out in another tab or after login)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'user_data') {
+        console.log('📦 localStorage user_data changed, reloading user context...');
+        loadUserData();
+      }
+      if (e.key === 'auth_token' && !e.newValue) {
+        // Token was removed (logout)
+        console.log('🚪 auth_token removed, clearing user context...');
+        setUser(null);
+        setProfile(null);
+        setNotifications([]);
+        setPendingTasks([]);
+        setIsLoading(false);
+      }
     };
 
-    loadUserData();
-  }, []);
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Also listen for custom events (for same-tab logout/login)
+    const handleUserDataChange = () => {
+      console.log('🔄 Custom user data change event, reloading...');
+      loadUserData();
+    };
+    
+    window.addEventListener('userDataChanged', handleUserDataChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userDataChanged', handleUserDataChange);
+    };
+  }, [loadUserData]);
 
   const hasPermission = (resource: string, action: string): boolean => {
     if (!user) return false;
@@ -340,11 +379,14 @@ export function UserProvider({ children }: UserProviderProps) {
   };
 
   const logout = () => {
+    console.log('🚪 Logging out, clearing user context...');
     // Clear all user data
     setUser(null);
     setProfile(null);
     setNotifications([]);
     setPendingTasks([]);
+    // Dispatch custom event to trigger reload in other components
+    window.dispatchEvent(new Event('userDataChanged'));
   };
 
   const value: UserContextType = {

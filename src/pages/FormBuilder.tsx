@@ -41,6 +41,7 @@ import {
 import eSignatureService, { ESignatureDocument, FieldMapping } from '@/services/eSignatureService';
 import staffService, { Staff } from '@/services/staffService';
 import authService from '@/services/authService';
+import { convertPDFToImages } from '@/utils/pdfConverter';
 
 interface FieldType {
   type: FieldMapping['fieldType'];
@@ -132,12 +133,17 @@ export default function FormBuilder() {
   const [previewImages, setPreviewImages] = useState<string[]>([]); // Base64 preview images for each page
   const [pdfContainerRef, setPdfContainerRef] = useState<HTMLDivElement | null>(null);
   const pdfBlobUrlRef = useRef<string | null>(null);
+  const pdfContainerRefs = useRef<Map<number, HTMLDivElement>>(new Map()); // Store refs for all pages
   const [pdfPageDimensions, setPdfPageDimensions] = useState<Array<{ width: number; height: number }>>([]);
   const [pdfDpi, setPdfDpi] = useState<number>(72); // Default PDF DPI
+  const [imagesLoaded, setImagesLoaded] = useState<Set<number>>(new Set()); // Track which images have loaded
   
   // Drag & drop state
   const [draggingField, setDraggingField] = useState<FieldMapping | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
+  const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false); // Track if actually dragging (not just clicking)
+  const DRAG_THRESHOLD = 5; // Minimum pixels to move before starting drag
   const [isPlacingField, setIsPlacingField] = useState<FieldType | null>(null); // Field type being placed
   const [draggingFieldType, setDraggingFieldType] = useState<FieldType | null>(null); // Field type being dragged from sidebar
   
@@ -148,10 +154,6 @@ export default function FormBuilder() {
   const [isSaveNameModalOpen, setIsSaveNameModalOpen] = useState(false);
   const [documentName, setDocumentName] = useState('');
 
-  // Save as Template modal
-  const [isSaveAsTemplateModalOpen, setIsSaveAsTemplateModalOpen] = useState(false);
-  const [templateName, setTemplateName] = useState('');
-  const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
   // Share dialog
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -190,6 +192,39 @@ export default function FormBuilder() {
       }
     };
   }, [documentId, templateId, editTemplate, uploadedDocumentData]);
+
+  // Reset imagesLoaded when document/template or preview images change
+  useEffect(() => {
+    setImagesLoaded(new Set());
+    
+    // Check if images are already loaded (cached images)
+    // This handles the case where onLoad might not fire for cached images
+    if (previewImages.length > 0) {
+      // Use setTimeout to ensure DOM is updated and refs are set
+      setTimeout(() => {
+        previewImages.forEach((_, index) => {
+          const pageNumber = index + 1;
+          // Get container from refs map
+          const container = pdfContainerRefs.current.get(pageNumber);
+          if (container) {
+            const imgElement = container.querySelector(`img[data-page-container="${pageNumber}"]`) as HTMLImageElement;
+            if (imgElement && imgElement.complete && imgElement.naturalWidth > 0) {
+              // Image is already loaded
+              setImagesLoaded(prev => new Set(prev).add(pageNumber));
+            }
+          } else {
+            // Fallback: try to find by data attribute
+            const imgElement = window.document.querySelector(`img[data-page-container="${pageNumber}"]`) as HTMLImageElement;
+            if (imgElement && imgElement.complete && imgElement.naturalWidth > 0) {
+              setImagesLoaded(prev => new Set(prev).add(pageNumber));
+            }
+          }
+        });
+        // Force re-render after checking all images
+        setFieldMappings(prev => [...prev]);
+      }, 100);
+    }
+  }, [eSignatureDocument?.id, previewImages.length, editTemplate, templateId]);
   
   const loadTemplateForEditing = async () => {
     if (!templateId) return;
@@ -221,42 +256,85 @@ export default function FormBuilder() {
         setESignatureDocument(templateAsDocument);
         setFieldMappings(template.fieldMappings || []);
         
-        // Load preview images if available (preferred for editor)
-        if (template.previewImages && template.previewImages.length > 0) {
-          setPreviewImages(template.previewImages);
-          setNumPages(template.previewImages.length);
-          setPdfLoading(false);
-        } else if (template.fileUrl) {
-          // Fallback: If no preview images, use PDF URL
-          setPdfUrl(template.fileUrl);
-          setPdfLoading(false);
-          toast({
-            variant: 'default',
-            title: 'Preview Images Not Available',
-            description: 'Loading PDF directly. Preview images will be generated on the server.',
-          });
-        }
-        
-        // Load PDF metadata for coordinate conversion
+        // CRITICAL: Load PDF metadata FIRST (before conversion) for coordinate conversion
         if (template.pdfDpi) {
           setPdfDpi(template.pdfDpi);
         } else {
           setPdfDpi(72); // Default DPI
         }
-        if (template.pdfPageDimensions && template.pdfPageDimensions.length > 0) {
-          setPdfPageDimensions(template.pdfPageDimensions);
-          setNumPages(template.pdfPageDimensions.length);
-        } else {
-          // Default page dimensions if not available
-          setPdfPageDimensions([{ width: 612, height: 792 }]);
-          if (!template.previewImages || template.previewImages.length === 0) {
-            setNumPages(1);
+        
+        // Parse page dimensions if they come as JSON string from backend
+        let parsedDimensions = template.pdfPageDimensions;
+        if (typeof parsedDimensions === 'string') {
+          try {
+            parsedDimensions = JSON.parse(parsedDimensions);
+            console.log('📋 Parsed page dimensions from JSON string:', parsedDimensions);
+          } catch (parseError) {
+            console.error('Failed to parse pdfPageDimensions:', parseError);
+            parsedDimensions = [{ width: 612, height: 792 }];
           }
         }
         
-        // Store PDF URL
+        if (parsedDimensions && Array.isArray(parsedDimensions) && parsedDimensions.length > 0) {
+          setPdfPageDimensions(parsedDimensions);
+          setNumPages(parsedDimensions.length);
+        } else {
+          // Default page dimensions if not available
+          setPdfPageDimensions([{ width: 612, height: 792 }]);
+          setNumPages(1);
+        }
+        
+        // Convert PDF to images on frontend using pdfjs-dist
         if (template.fileUrl) {
-          setPdfUrl(template.fileUrl);
+          try {
+            setPdfUrl(template.fileUrl);
+            
+            console.log('🎨 Converting template PDF to images on frontend...');
+            console.log('Template metadata:', {
+              dpi: template.pdfDpi || 72,
+              pages: template.pdfPageDimensions?.length || 1,
+              dimensions: template.pdfPageDimensions
+            });
+            
+            toast({
+              title: 'Loading Template',
+              description: 'Converting PDF pages to images...',
+            });
+            
+            // Convert PDF to base64 images using pdfjs-dist (browser-native)
+            const images = await convertPDFToImages(template.fileUrl, { scale: 2 });
+            
+            // Extract base64 image data from results
+            const base64Images = images.map(img => img.imageData);
+            
+            console.log(`✅ Converted ${images.length} template pages on frontend`);
+            
+            setPreviewImages(base64Images);
+            setNumPages(images.length);
+            setPdfLoading(false);
+            
+            toast({
+              title: 'Success',
+              description: `Template loaded with ${images.length} pages. You can now edit field mappings.`,
+            });
+            
+          } catch (conversionError) {
+            console.error('❌ Frontend template conversion failed:', conversionError);
+            setPdfLoading(false);
+            toast({
+              variant: 'destructive',
+              title: 'Template Conversion Failed',
+              description: conversionError instanceof Error ? conversionError.message : 'Failed to convert template PDF to images',
+            });
+          }
+        } else {
+          console.warn('No template file URL available');
+          setPdfLoading(false);
+          toast({
+            variant: 'destructive',
+            title: 'Error',
+            description: 'Template file URL is not available',
+          });
         }
       }
     } catch (error: any) {
@@ -340,115 +418,99 @@ export default function FormBuilder() {
   // Load document from provided data (e.g., from upload response)
   const loadDocumentFromData = async (documentData: ESignatureDocument) => {
     console.log('Loading document from provided data:', documentData);
-    console.log('Preview images:', documentData.previewImages?.length || 0);
     console.log('File URL:', documentData.fileUrl);
     
     setESignatureDocument(documentData);
     setFieldMappings(documentData.fieldMappings || []);
     
-    // CRITICAL: Prioritize preview images for drag and drop functionality
-    // Preview images are required for field placement via drag and drop
-    if (documentData.previewImages && documentData.previewImages.length > 0) {
-      console.log('Using preview images for field placement:', documentData.previewImages.length);
-      setPreviewImages(documentData.previewImages);
-      setNumPages(documentData.previewImages.length);
-      setPdfLoading(false);
-      
-      // Also store PDF URL for download/viewing, but don't use it for display
-      if (documentData.fileUrl) {
-        setPdfUrl(documentData.fileUrl);
+    // CRITICAL: Load PDF metadata FIRST (before conversion) for coordinate conversion
+    if (documentData.pdfDpi) {
+      setPdfDpi(documentData.pdfDpi);
+    } else {
+      setPdfDpi(72); // Default DPI
+    }
+    
+    // Parse page dimensions if they come as JSON string from backend
+    let parsedDimensions = documentData.pdfPageDimensions;
+    if (typeof parsedDimensions === 'string') {
+      try {
+        parsedDimensions = JSON.parse(parsedDimensions);
+        console.log('📋 Parsed page dimensions from JSON string:', parsedDimensions);
+      } catch (parseError) {
+        console.error('Failed to parse pdfPageDimensions:', parseError);
+        parsedDimensions = [{ width: 612, height: 792 }];
       }
-    } else if (documentData.fileUrl) {
-      // Fallback: If no preview images, show PDF but warn user
-      console.warn('No preview images available, showing PDF (drag and drop may not work)');
-      toast({
-        variant: 'default',
-        title: 'Preview Images Not Available',
-        description: 'PDF is shown but field drag and drop requires preview images. Retrying in 3 seconds...',
-      });
-      
-      // Try to load PDF via download endpoint
-      if (documentData.id) {
-        try {
-          console.log('Loading PDF via download endpoint as fallback...');
-          setPdfLoading(true);
-          const blob = await eSignatureService.downloadDocument(documentData.id);
-          const blobUrl = URL.createObjectURL(blob);
-          console.log('PDF loaded as blob URL:', blobUrl);
-          
-          // Clean up old blob URL if exists
-          if (pdfBlobUrlRef.current) {
-            URL.revokeObjectURL(pdfBlobUrlRef.current);
-          }
-          pdfBlobUrlRef.current = blobUrl;
-          setPdfUrl(blobUrl);
-          setPdfLoading(false);
-          
-          // Retry loading document after 3 seconds to check for preview images
-          if (documentData.id) {
-            setTimeout(async () => {
-              try {
-                console.log('Retrying to load preview images...');
-                const retryResponse = await eSignatureService.getDocumentById(documentData.id);
-                if (retryResponse.success && retryResponse.data?.previewImages && retryResponse.data.previewImages.length > 0) {
-                  console.log('Preview images now available:', retryResponse.data.previewImages.length);
-                  setPreviewImages(retryResponse.data.previewImages);
-                  setNumPages(retryResponse.data.previewImages.length);
-                  toast({
-                    title: 'Success',
-                    description: 'Preview images loaded! You can now use drag and drop.',
-                  });
-                }
-              } catch (retryError) {
-                console.warn('Retry failed:', retryError);
-              }
-            }, 3000);
-          }
-        } catch (downloadError) {
-          console.warn('Download endpoint failed, using direct fileUrl:', downloadError);
-          setPdfUrl(documentData.fileUrl);
-          setPdfLoading(false);
-        }
-      } else {
+    }
+    
+    if (parsedDimensions && Array.isArray(parsedDimensions) && parsedDimensions.length > 0) {
+      setPdfPageDimensions(parsedDimensions);
+      setNumPages(parsedDimensions.length);
+    } else {
+      // Default page dimensions if not available
+      setPdfPageDimensions([{ width: 612, height: 792 }]);
+      setNumPages(1);
+    }
+    
+    // Set user selections
+    if (documentData.internalUsers) {
+      setSelectedInternalUsers(documentData.internalUsers.map(u => u.id));
+    }
+    if (documentData.externalUsers) {
+      setExternalEmails(documentData.externalUsers.map(u => u.email));
+    }
+    
+    // Convert PDF to images on frontend using pdfjs-dist
+    if (documentData.fileUrl) {
+      try {
+        setPdfLoading(true);
         setPdfUrl(documentData.fileUrl);
+        
+        console.log('🎨 Converting PDF to images on frontend...');
+        console.log('Document metadata:', {
+          dpi: documentData.pdfDpi || 72,
+          pages: documentData.pdfPageDimensions?.length || 1,
+          dimensions: documentData.pdfPageDimensions
+        });
+        
+        toast({
+          title: 'Loading PDF',
+          description: 'Converting PDF pages to images...',
+        });
+        
+        // Convert PDF to base64 images using pdfjs-dist (browser-native)
+        const images = await convertPDFToImages(documentData.fileUrl, { scale: 2 });
+        
+        // Extract base64 image data from results
+        const base64Images = images.map(img => img.imageData);
+        
+        console.log(`✅ Converted ${images.length} pages on frontend`);
+        
+        setPreviewImages(base64Images);
+        setNumPages(images.length);
         setPdfLoading(false);
+        
+        toast({
+          title: 'Success',
+          description: `PDF loaded with ${images.length} pages. You can now drag and drop fields.`,
+        });
+        
+      } catch (conversionError) {
+        console.error('❌ Frontend PDF conversion failed:', conversionError);
+        setPdfLoading(false);
+        toast({
+          variant: 'destructive',
+          title: 'PDF Conversion Failed',
+          description: conversionError instanceof Error ? conversionError.message : 'Failed to convert PDF to images',
+        });
       }
     } else {
-      console.warn('No preview images and no fileUrl available');
+      console.warn('No file URL available');
       setPdfLoading(false);
       toast({
         variant: 'destructive',
         title: 'Error',
         description: 'PDF file URL is not available',
       });
-    }
-    
-    // Load PDF metadata for coordinate conversion
-    if (documentData.pdfDpi) {
-      setPdfDpi(documentData.pdfDpi);
-    } else {
-      setPdfDpi(72); // Default DPI
-    }
-    if (documentData.pdfPageDimensions && documentData.pdfPageDimensions.length > 0) {
-      setPdfPageDimensions(documentData.pdfPageDimensions);
-      setNumPages(documentData.pdfPageDimensions.length);
-    } else {
-      // Default page dimensions if not available
-      setPdfPageDimensions([{ width: 612, height: 792 }]);
-      if (!documentData.previewImages || documentData.previewImages.length === 0) {
-        setNumPages(1);
-      }
-    }
-    
-    // Store PDF URL for download/viewing (if not already set)
-    if (documentData.fileUrl && !pdfUrl) {
-      setPdfUrl(documentData.fileUrl);
-    }
-    if (documentData.internalUsers) {
-      setSelectedInternalUsers(documentData.internalUsers.map(u => u.id));
-    }
-    if (documentData.externalUsers) {
-      setExternalEmails(documentData.externalUsers.map(u => u.email));
     }
     
     setLoading(false);
@@ -506,6 +568,12 @@ export default function FormBuilder() {
     const scaleX = pageDim.width / viewportWidth;
     const scaleY = pageDim.height / viewportHeight;
     
+    console.log('🔄 Converting viewport to PDF coords:');
+    console.log('   Input:', { viewportX, viewportY, viewportWidth, viewportHeight, pageIndex });
+    console.log('   Page dim:', pageDim);
+    console.log('   Scales:', { scaleX, scaleY });
+    console.log('   Result X:', viewportX * scaleX, 'Result Y:', viewportY * scaleY);
+    
     return {
       x: viewportX * scaleX,
       y: viewportY * scaleY,
@@ -538,6 +606,7 @@ export default function FormBuilder() {
 
   // Handle drag start from field button
   const handleFieldTypeDragStart = (e: React.DragEvent, fieldType: FieldType) => {
+    console.log('🎯 Drag started:', fieldType);
     setDraggingFieldType(fieldType);
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('text/plain', JSON.stringify(fieldType));
@@ -553,7 +622,13 @@ export default function FormBuilder() {
     e.preventDefault();
     e.stopPropagation();
     
+    console.log('📍 Drop triggered on page:', pageIndex + 1);
+    console.log('   draggingFieldType:', draggingFieldType);
+    console.log('   previewImages.length:', previewImages.length);
+    console.log('   pdfPageDimensions:', pdfPageDimensions);
+    
     if (!draggingFieldType || !previewImages.length) {
+      console.warn('⚠️ Drop failed: missing draggingFieldType or previewImages');
       setDraggingFieldType(null);
       return;
     }
@@ -561,22 +636,34 @@ export default function FormBuilder() {
     const container = e.currentTarget;
     const img = container.querySelector('img');
     if (!img) {
+      console.warn('⚠️ Drop failed: image element not found');
       setDraggingFieldType(null);
       return;
     }
     
     const imgRect = img.getBoundingClientRect();
     
+    console.log('🖼️ Image rect:', imgRect);
+    console.log('   width:', imgRect.width, 'height:', imgRect.height);
+    console.log('   clientX:', e.clientX, 'clientY:', e.clientY);
+    console.log('   imgRect.left:', imgRect.left, 'imgRect.top:', imgRect.top);
+    
     // Calculate drop position relative to image
     const dropX = e.clientX - imgRect.left;
     const dropY = e.clientY - imgRect.top;
+    
+    console.log('💧 Drop position (viewport):', { dropX, dropY });
     
     // Get image dimensions
     const viewportWidth = imgRect.width;
     const viewportHeight = imgRect.height;
     
+    console.log('📐 Viewport dimensions:', { viewportWidth, viewportHeight });
+    
     // Convert to PDF DPI coordinates
     const pageDim = pdfPageDimensions[pageIndex] || { width: 612, height: 792 };
+    console.log('📄 PDF page dimensions:', pageDim);
+    
     const pdfCoords = convertViewportToPdfCoordinates(
       dropX,
       dropY,
@@ -584,6 +671,8 @@ export default function FormBuilder() {
       viewportHeight,
       pageIndex
     );
+    
+    console.log('🔢 PDF coordinates after conversion:', pdfCoords);
     
     // Default field dimensions in PDF points
     const defaultPdfWidth = 200;
@@ -611,6 +700,10 @@ export default function FormBuilder() {
       pdfPageHeight: pageDim.height,
     };
     
+    console.log('✅ Field added successfully:', newField);
+    console.log('   Position (PDF points):', { x: newField.x, y: newField.y });
+    console.log('   Page dimensions:', pageDim);
+    
     setFieldMappings([...fieldMappings, newField]);
     setSelectedField(newField);
     setDraggingFieldType(null);
@@ -622,6 +715,13 @@ export default function FormBuilder() {
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
+    // Log only once per second to avoid console spam
+    const now = Date.now();
+    const lastLog = (window as any).lastDragOverLog;
+    if (!lastLog || now - lastLog > 1000) {
+      console.log('🔄 Dragging over PDF area...');
+      (window as any).lastDragOverLog = now;
+    }
   };
 
   // Handle click on preview image (kept for backward compatibility, but not used for field placement)
@@ -633,46 +733,138 @@ export default function FormBuilder() {
   // Handle field drag start
   const handleFieldDragStart = (e: React.MouseEvent, field: FieldMapping) => {
     e.stopPropagation();
-    setDraggingField(field);
+    e.preventDefault();
+    
     const fieldElement = e.currentTarget as HTMLElement;
-    const rect = fieldElement.getBoundingClientRect();
+    const fieldRect = fieldElement.getBoundingClientRect();
+    
+    // Calculate offset: where we clicked relative to the field's top-left corner
+    // This offset will be used to maintain the relative position when dragging
+    setDragStartPos({ x: e.clientX, y: e.clientY });
     setDragOffset({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: e.clientX - fieldRect.left,
+      y: e.clientY - fieldRect.top,
     });
+    
+    setDraggingField(field);
+    setIsDragging(false); // Not dragging yet, just clicked
   };
 
   // Handle field drag
   const handleFieldDrag = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!draggingField || !dragOffset) return;
+    if (!draggingField || !dragOffset || !dragStartPos) return;
+    
+    // Calculate distance moved from initial click
+    const deltaX = Math.abs(e.clientX - dragStartPos.x);
+    const deltaY = Math.abs(e.clientY - dragStartPos.y);
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    
+    // Only start dragging if mouse moved beyond threshold
+    if (!isDragging && distance < DRAG_THRESHOLD) {
+      return; // Still just a click, not a drag
+    }
+    
+    // Mark as dragging
+    if (!isDragging) {
+      setIsDragging(true);
+    }
     
     const container = e.currentTarget;
     const img = container.querySelector('img');
     if (!img) return;
     
     const imgRect = img.getBoundingClientRect();
-    const clickX = e.clientX - imgRect.left - dragOffset.x;
-    const clickY = e.clientY - imgRect.top - dragOffset.y;
+    const containerRect = container.getBoundingClientRect();
     
     // Get image dimensions
     const viewportWidth = imgRect.width;
     const viewportHeight = imgRect.height;
     
-    // Convert to PDF DPI coordinates
+    // Get page dimensions for calculations
     const pageDim = pdfPageDimensions[draggingField.pageNumber - 1] || { width: 612, height: 792 };
+    const fieldWidth = Number(draggingField.width) || 200;
+    const fieldHeight = Number(draggingField.height) || 30;
+    
+    // Calculate scale factors for conversion
+    const scaleX = viewportWidth / pageDim.width;
+    const scaleY = viewportHeight / pageDim.height;
+    
+    // Calculate maximum positions in viewport coordinates
+    const maxXViewport = (pageDim.width - fieldWidth) * scaleX;
+    const maxYViewport = (pageDim.height - fieldHeight) * scaleY;
+    
+    // Calculate mouse position relative to image
+    // Allow mouse to go beyond image to reach edges
+    // To position field at maxX, mouse needs to be at: maxXViewport + dragOffset.x
+    const rawMouseX = e.clientX - imgRect.left;
+    const rawMouseY = e.clientY - imgRect.top;
+    
+    // Allow mouse to go enough to the right to position field at maxX
+    // Don't restrict mouse movement - let it go anywhere, we'll clamp the final result
+    const mouseXRelativeToImage = rawMouseX;
+    const mouseYRelativeToImage = rawMouseY;
+    
+    // Calculate new position: mouse position minus the offset from where we clicked on the field
+    // This gives us the top-left corner of where the field should be in viewport coordinates
+    let newX = mouseXRelativeToImage - dragOffset.x;
+    let newY = mouseYRelativeToImage - dragOffset.y;
+    
+    // Clamp newX/newY to viewport bounds (allowing field to reach edges)
+    // maxXViewport and maxYViewport are already calculated above
+    newX = Math.max(0, Math.min(maxXViewport, newX));
+    newY = Math.max(0, Math.min(maxYViewport, newY));
+    
+    // Convert to PDF coordinates
     const pdfCoords = convertViewportToPdfCoordinates(
-      clickX,
-      clickY,
+      newX,
+      newY,
       viewportWidth,
       viewportHeight,
       draggingField.pageNumber - 1
     );
     
-    // Update field position
+    // Calculate maximum X and Y positions in PDF coordinates
+    // Field's right edge (x + width) should be able to reach page width
+    // So maxX = pageWidth - fieldWidth (this allows field's right edge to be at pageWidth)
+    const maxX = pageDim.width - fieldWidth;
+    const maxY = pageDim.height - fieldHeight;
+    
+    // Clamp coordinates to page bounds (should already be within bounds due to viewport clamping)
+    const clampedX = Math.max(0, Math.min(maxX, pdfCoords.x));
+    const clampedY = Math.max(0, Math.min(maxY, pdfCoords.y));
+    
+    // Debug logging for right edge dragging
+    if (Math.abs(pdfCoords.x - maxX) < 100 || rawMouseX > viewportWidth * 0.8) {
+      console.log('🔍 Right edge drag:', {
+        mouse: {
+          rawMouseX: rawMouseX.toFixed(2),
+          mouseXRelativeToImage: mouseXRelativeToImage.toFixed(2),
+          dragOffsetX: dragOffset.x.toFixed(2),
+          viewportWidth: viewportWidth.toFixed(2)
+        },
+        viewport: {
+          newX: newX.toFixed(2),
+          maxXViewport: maxXViewport.toFixed(2),
+          neededMouseX: (maxXViewport + dragOffset.x).toFixed(2)
+        },
+        pdf: {
+          pdfCoordsX: pdfCoords.x.toFixed(2),
+          maxX: maxX.toFixed(2),
+          clampedX: clampedX.toFixed(2),
+          pageWidth: pageDim.width.toFixed(2),
+          fieldWidth: fieldWidth.toFixed(2),
+          fieldRightEdge: (clampedX + fieldWidth).toFixed(2)
+        },
+        canReachRight: pdfCoords.x <= maxX,
+        isClamped: pdfCoords.x !== clampedX
+      });
+    }
+    
+    // Update field position with bounds checking
     const updatedField = {
       ...draggingField,
-      x: Math.max(0, Math.min(pageDim.width - draggingField.width, pdfCoords.x)),
-      y: Math.max(0, Math.min(pageDim.height - draggingField.height, pdfCoords.y)),
+      x: clampedX,
+      y: clampedY,
     };
     
     setFieldMappings(
@@ -682,13 +874,29 @@ export default function FormBuilder() {
   };
 
   // Handle drag end
-  const handleFieldDragEnd = () => {
+  const handleFieldDragEnd = (e?: React.MouseEvent) => {
+    const wasDragging = isDragging;
+    
+    // If we were actually dragging, prevent click event
+    if (wasDragging && e) {
+      e?.preventDefault();
+      e?.stopPropagation();
+    }
+    
     setDraggingField(null);
     setDragOffset(null);
+    setDragStartPos(null);
+    setIsDragging(false);
+    
+    // Return whether we were dragging (so click handler can decide)
+    return wasDragging;
   };
 
   const handleFieldClick = (field: FieldMapping) => {
-    setSelectedField(field);
+    // Only select if we're not currently dragging
+    if (!isDragging) {
+      setSelectedField(field);
+    }
   };
 
 
@@ -809,6 +1017,12 @@ export default function FormBuilder() {
     if (editTemplate && templateId) {
       try {
         setSaving(true);
+        console.log('💾 Saving template with field mappings:', {
+          templateId,
+          templateName: fileName || eSignatureDocument?.fileName || '',
+          fieldMappingsCount: fieldMappings.length,
+          fieldMappings: fieldMappings
+        });
         const response = await eSignatureService.updateTemplate(templateId, {
           templateName: fileName || eSignatureDocument?.fileName || '',
           fieldMappings,
@@ -854,10 +1068,19 @@ export default function FormBuilder() {
       }
       
       const response = await eSignatureService.updateDocument(documentId, updateData);
+      
+      // Share document with selected users (if any)
+      if (selectedInternalUsers.length > 0 || externalEmails.length > 0) {
+        await eSignatureService.shareDocument(documentId, {
+          internalUserIds: selectedInternalUsers,
+          externalEmails: externalEmails
+        });
+      }
+      
       if (response.success) {
         toast({
           title: 'Success',
-          description: 'Document saved successfully',
+          description: 'Document saved and shared successfully',
         });
         
         // If this was a new document, navigate to document list
@@ -891,37 +1114,6 @@ export default function FormBuilder() {
     await performSave(documentName.trim());
   };
 
-  const handleSaveAsTemplate = async () => {
-    if (!documentId || !templateName.trim()) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Please enter a template name',
-      });
-      return;
-    }
-
-    try {
-      setSavingAsTemplate(true);
-      const response = await eSignatureService.saveDocumentAsTemplate(documentId, templateName.trim());
-      if (response.success) {
-        toast({
-          title: 'Success',
-          description: 'Document saved as template successfully',
-        });
-        setIsSaveAsTemplateModalOpen(false);
-        setTemplateName('');
-      }
-    } catch (error: any) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: error.message || 'Failed to save as template',
-      });
-    } finally {
-      setSavingAsTemplate(false);
-    }
-  };
 
   const handleShare = async () => {
     if (!documentId) return;
@@ -972,10 +1164,10 @@ export default function FormBuilder() {
             </p>
             <Button
               className="mt-4"
-              onClick={() => navigate('/forms')}
+              onClick={() => navigate(editTemplate ? '/forms/templates' : '/forms')}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Documents
+              {editTemplate ? 'Back to Templates' : 'Back to Documents'}
             </Button>
           </CardContent>
         </Card>
@@ -1080,27 +1272,14 @@ export default function FormBuilder() {
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
-              onClick={() => navigate('/forms')}
+              onClick={() => navigate(editTemplate ? '/forms/templates' : '/forms')}
               className="justify-start"
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Document
+              {editTemplate ? 'Back to Templates' : 'Back to Document'}
             </Button>
           </div>
           <div className="flex gap-2">
-            {!editTemplate && documentId && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setTemplateName(eSignatureDocument?.fileName || '');
-                  setIsSaveAsTemplateModalOpen(true);
-                }}
-                disabled={saving || !fieldMappings || fieldMappings.length === 0}
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Save as Template
-              </Button>
-            )}
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               <Save className="h-4 w-4 mr-2" />
@@ -1142,14 +1321,23 @@ export default function FormBuilder() {
                     return (
                       <div
                         key={index}
-                        ref={currentPage === pageNumber ? setPdfContainerRef : null}
+                        ref={(ref) => {
+                          if (ref) {
+                            pdfContainerRefs.current.set(currentPage, ref);
+                            if (currentPage === pageNumber) {
+                              setPdfContainerRef(ref);
+                            }
+                          } else {
+                            pdfContainerRefs.current.delete(currentPage);
+                          }
+                        }}
                         className={`relative bg-white shadow-2xl mx-auto ${
                           draggingFieldType ? 'ring-2 ring-blue-400 ring-offset-2' : ''
                         }`}
                         style={{ maxWidth: '100%' }}
                         onMouseMove={handleFieldDrag}
-                        onMouseUp={handleFieldDragEnd}
-                        onMouseLeave={handleFieldDragEnd}
+                        onMouseUp={(e) => handleFieldDragEnd(e)}
+                        onMouseLeave={() => handleFieldDragEnd()}
                         onClick={handleImageClick}
                         onDragOver={handleImageDragOver}
                         onDrop={(e) => handleImageDrop(e, index)}
@@ -1159,6 +1347,13 @@ export default function FormBuilder() {
                           alt={`Page ${currentPage}`}
                           className="w-full h-auto"
                           style={{ display: 'block' }}
+                          data-page-container={currentPage}
+                          onLoad={() => {
+                            // Mark this image as loaded
+                            setImagesLoaded(prev => new Set(prev).add(currentPage));
+                            // Force re-render to recalculate field positions
+                            setFieldMappings(prev => [...prev]);
+                          }}
                         />
                         {draggingFieldType && (
                           <div className="absolute inset-0 flex items-center justify-center bg-blue-100/50 pointer-events-none z-0 border-2 border-blue-400 border-dashed">
@@ -1168,14 +1363,26 @@ export default function FormBuilder() {
                           </div>
                         )}
                         {/* Overlay fields - convert PDF DPI coordinates to viewport */}
-                        {fieldMappings
+                        {(() => {
+                          const fieldsOnPage = fieldMappings.filter((field) => field.pageNumber === currentPage);
+                          if (fieldsOnPage.length > 0) {
+                            console.log(`🎯 Rendering ${fieldsOnPage.length} fields on page ${currentPage}`);
+                          }
+                          return null;
+                        })()}
+                        {/* Field Overlays - Only render if image has loaded */}
+                        {imagesLoaded.has(currentPage) && fieldMappings
                           .filter((field) => field.pageNumber === currentPage)
                           .map((field) => {
                             const pageDim = pdfPageDimensions[currentPage - 1] || { width: 612, height: 792 };
-                            const pageContainer = currentPage === pageNumber ? pdfContainerRef : null;
-                            const imgElement = pageContainer?.querySelector('img');
-                            const viewportWidth = imgElement?.clientWidth || 612;
-                            const viewportHeight = imgElement?.clientHeight || 792;
+                            // Get image element from the container for this page
+                            const container = pdfContainerRefs.current.get(currentPage);
+                            const imgElement = container?.querySelector(`img[data-page-container="${currentPage}"]`) || 
+                                              container?.querySelector('img');
+                            // Use getBoundingClientRect() to match drop handler coordinate calculation
+                            const imgRect = imgElement?.getBoundingClientRect();
+                            const viewportWidth = imgRect?.width || 612;
+                            const viewportHeight = imgRect?.height || 792;
                             const coords = convertPdfToViewportCoordinates(
                               field.x,
                               field.y,
@@ -1185,6 +1392,19 @@ export default function FormBuilder() {
                               viewportHeight,
                               currentPage - 1
                             );
+                            
+                            // Log coordinate conversion for debugging
+                            if (fieldMappings.filter(f => f.pageNumber === currentPage).indexOf(field) === 0) {
+                              console.log(`🗺️ Field coordinate conversion (Page ${currentPage}):`, {
+                                fieldId: field.id,
+                                fieldName: field.fieldName,
+                                pdfCoords: { x: field.x, y: field.y, width: field.width, height: field.height },
+                                viewportDims: { width: viewportWidth, height: viewportHeight },
+                                pageDims: pageDim,
+                                viewportCoords: coords
+                              });
+                            }
+                            
                             const fieldLabel = getFieldLabel(field.fieldType);
                             return (
                               <div
@@ -1209,18 +1429,26 @@ export default function FormBuilder() {
                                 {/* Draggable Field Card */}
                                 <div
                                   onMouseDown={(e) => handleFieldDragStart(e, field)}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleFieldClick(field);
-                                    setPageNumber(currentPage); // Switch to this page when clicking field
+                                  onMouseUp={(e) => {
+                                    const wasDragging = handleFieldDragEnd(e);
+                                    // Only handle click if we weren't dragging
+                                    if (!wasDragging) {
+                                      e.stopPropagation();
+                                      handleFieldClick(field);
+                                      setPageNumber(currentPage); // Switch to this page when clicking field
+                                    }
                                   }}
                                   className={`flex items-center gap-2 px-3 py-2 bg-white border-2 rounded cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-shadow ${
                                     draggingField?.id === field.id
-                                      ? 'border-blue-400 shadow-lg'
-                                      : 'border-blue-200'
+                                      ? field.assignedTo === 'external' ? 'border-yellow-400 shadow-lg' : field.assignedTo === 'internal' ? 'border-blue-400 shadow-lg' : 'border-gray-400 shadow-lg'
+                                      : field.assignedTo === 'external' ? 'border-yellow-200' : field.assignedTo === 'internal' ? 'border-blue-200' : 'border-gray-200'
                                   } ${
                                     selectedField?.id === field.id
-                                      ? 'border-blue-400 ring-2 ring-blue-200'
+                                      ? field.assignedTo === 'external' 
+                                        ? 'border-yellow-400 ring-2 ring-yellow-200' 
+                                        : field.assignedTo === 'internal'
+                                          ? 'border-blue-400 ring-2 ring-blue-200'
+                                          : 'border-gray-400 ring-2 ring-gray-200'
                                       : ''
                                   }`}
                                   style={{
@@ -1228,13 +1456,13 @@ export default function FormBuilder() {
                                   }}
                                 >
                                   {/* Field Icon */}
-                                  <div className="text-blue-600 flex-shrink-0">
+                                  <div className={field.assignedTo === 'external' ? 'text-yellow-600 flex-shrink-0' : field.assignedTo === 'internal' ? 'text-blue-600 flex-shrink-0' : 'text-gray-600 flex-shrink-0'}>
                                     {getFieldIcon(field.fieldType)}
                                   </div>
                                   
                                   {/* Field Label */}
-                                  <span className="text-blue-600 text-sm font-medium flex-1">
-                                    {field.fieldName || fieldLabel}
+                                  <span className={field.assignedTo === 'external' ? 'text-yellow-700 text-sm font-medium flex-1' : field.assignedTo === 'internal' ? 'text-blue-600 text-sm font-medium flex-1' : 'text-gray-700 text-sm font-medium flex-1'}>
+                                    {field.fieldName || fieldLabel} {!field.assignedTo && '(No Assignment)'}
                                   </span>
                                   
                                   {/* Delete Button */}
@@ -1577,54 +1805,6 @@ export default function FormBuilder() {
         </div>
         </div>
       )}
-
-      {/* Save as Template Modal */}
-      <Dialog open={isSaveAsTemplateModalOpen} onOpenChange={setIsSaveAsTemplateModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Save Document as Template</DialogTitle>
-            <DialogDescription>
-              Save this document as a reusable template for future use.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="templateName">Template Name</Label>
-              <Input
-                id="templateName"
-                value={templateName}
-                onChange={(e) => setTemplateName(e.target.value)}
-                placeholder="Enter template name"
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleSaveAsTemplate();
-                  }
-                }}
-                autoFocus
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsSaveAsTemplateModalOpen(false);
-                setTemplateName('');
-              }}
-              disabled={savingAsTemplate}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSaveAsTemplate}
-              disabled={savingAsTemplate || !templateName.trim()}
-            >
-              {savingAsTemplate && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Save Template
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Save Document Name Modal */}
       <Dialog open={isSaveNameModalOpen} onOpenChange={setIsSaveNameModalOpen}>

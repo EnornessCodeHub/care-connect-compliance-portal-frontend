@@ -106,6 +106,9 @@ export function AppLayout({ children }: AppLayoutProps) {
     // Clear auth token and user data from localStorage
     authService.logout();
     
+    // Dispatch custom event to trigger UserContext reload
+    window.dispatchEvent(new Event('userDataChanged'));
+    
     // Show success notification
     toast({
       title: "Logged Out",

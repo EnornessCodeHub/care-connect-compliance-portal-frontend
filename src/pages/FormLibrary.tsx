@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,9 +53,25 @@ import { formatDistanceToNow } from 'date-fns';
 export default function FormLibrary() {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user, isLoading: userLoading } = useUser();
   const isAdmin = authService.isAdmin();
-  const currentUserId = user?.id;
+  
+  // Get user ID from context or fallback to localStorage
+  const currentUserId = useMemo(() => {
+    if (user?.id) {
+      const id = String(user.id).trim();
+      console.log('👤 User ID from context:', id, typeof id);
+      return id || undefined;
+    }
+    const userData = authService.getUserData();
+    if (userData?.id) {
+      const id = String(userData.id).trim();
+      console.log('👤 User ID from localStorage:', id, typeof id);
+      return id || undefined;
+    }
+    console.warn('⚠️ No user ID found');
+    return undefined;
+  }, [user?.id]);
   
   const [documents, setDocuments] = useState<ESignatureDocument[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,39 +98,90 @@ export default function FormLibrary() {
   const [internalStaffPopoverOpen, setInternalStaffPopoverOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  useEffect(() => {
-    loadDocuments();
-  }, [isAdmin, currentUserId]);
-
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
     try {
       setLoading(true);
+      console.log('📥 Loading documents...', { isAdmin, currentUserId, userLoading });
+      
       const response = await eSignatureService.getDocuments();
+      
       if (response.success && response.data) {
         let filteredDocuments = response.data;
+        console.log(`📚 Total documents from API: ${filteredDocuments.length}`);
         
         // For staff users, only show documents assigned to them
-        if (!isAdmin && currentUserId) {
-          filteredDocuments = filteredDocuments.filter(doc => {
-            // Check if document is assigned to current user
-            const isAssigned = doc.internalUsers?.some(
-              internalUser => internalUser.id === currentUserId
-            );
-            return isAssigned;
-          });
+        if (!isAdmin) {
+          if (currentUserId) {
+            console.log('🔍 Filtering documents for staff user:', currentUserId, typeof currentUserId);
+            const currentUserIdNum = Number(currentUserId);
+            const currentUserIdStr = String(currentUserId).trim();
+            
+            filteredDocuments = filteredDocuments.filter(doc => {
+              // Check if document is assigned to current user
+              // Try multiple comparison methods to handle different formats
+              const isAssigned = doc.internalUsers?.some(
+                internalUser => {
+                  const internalUserIdNum = Number(internalUser.id);
+                  const internalUserIdStr = String(internalUser.id).trim();
+                  
+                  // Try both number and string comparison
+                  const match1 = internalUserIdNum === currentUserIdNum;
+                  const match2 = internalUserIdStr === currentUserIdStr;
+                  const match3 = String(internalUserIdNum) === String(currentUserIdNum);
+                  
+                  const userIdMatch = match1 || match2 || match3;
+                  
+                  console.log(`  Comparing:`, {
+                    internalUserId: internalUser.id,
+                    internalUserIdType: typeof internalUser.id,
+                    currentUserId: currentUserId,
+                    currentUserIdType: typeof currentUserId,
+                    match1: `${internalUserIdNum} === ${currentUserIdNum} => ${match1}`,
+                    match2: `"${internalUserIdStr}" === "${currentUserIdStr}" => ${match2}`,
+                    match3: `"${internalUserIdNum}" === "${currentUserIdNum}" => ${match3}`,
+                    finalMatch: userIdMatch
+                  });
+                  
+                  return userIdMatch;
+                }
+              );
+              
+              if (doc.internalUsers && doc.internalUsers.length > 0) {
+                console.log(`📄 Document "${doc.fileName}":`, {
+                  internalUsers: doc.internalUsers.map(u => ({ 
+                    id: u.id, 
+                    type: typeof u.id,
+                    idAsNumber: Number(u.id),
+                    idAsString: String(u.id)
+                  })),
+                  isAssigned,
+                  currentUserId,
+                  currentUserIdType: typeof currentUserId,
+                  currentUserIdAsNumber: Number(currentUserId)
+                });
+              }
+              return isAssigned;
+            });
+            console.log(`✅ Filtered ${filteredDocuments.length} documents for staff`);
+          } else {
+            console.warn('⚠️ Staff user but no currentUserId available yet');
+            // Don't show any documents if user ID is not available
+            filteredDocuments = [];
+          }
         }
         
-        // Sort by lastUpdatedAt descending (newest first)
+        // Sort by createdAt descending (newest created first)
         const sortedDocuments = [...filteredDocuments].sort((a, b) => {
-          const dateA = new Date(a.lastUpdatedAt).getTime();
-          const dateB = new Date(b.lastUpdatedAt).getTime();
-          return dateB - dateA; // Descending order (newest first)
+          const dateA = new Date(a.createdAt).getTime();
+          const dateB = new Date(b.createdAt).getTime();
+          return dateB - dateA; // Descending order (newest created first)
         });
         setDocuments(sortedDocuments);
       } else {
         setDocuments([]);
       }
     } catch (error: any) {
+      console.error('❌ Error loading documents:', error);
       toast({
         variant: 'destructive',
         title: 'Error',
@@ -124,7 +191,31 @@ export default function FormLibrary() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdmin, currentUserId, toast]);
+
+  // Wait for user context to load before fetching documents
+  useEffect(() => {
+    // For admin, we can load immediately after userLoading is false
+    // For staff, we need both userLoading to be false AND currentUserId to be available
+    const canLoad = !userLoading && (isAdmin || currentUserId);
+    
+    if (canLoad) {
+      console.log('🚀 User loaded, fetching documents...', { 
+        userLoading, 
+        currentUserId, 
+        isAdmin,
+        canLoad 
+      });
+      loadDocuments();
+    } else {
+      console.log('⏳ Waiting for user to load...', { 
+        userLoading, 
+        currentUserId, 
+        isAdmin,
+        canLoad 
+      });
+    }
+  }, [userLoading, currentUserId, isAdmin, loadDocuments]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -461,11 +552,11 @@ export default function FormLibrary() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>File Name</TableHead>
-                      <TableHead>Shared to Internal</TableHead>
-                      <TableHead>Shared to External</TableHead>
+                      {isAdmin && <TableHead>Shared to Internal</TableHead>}
+                      {isAdmin && <TableHead>Shared to External</TableHead>}
                       <TableHead>Last Updated on</TableHead>
                       <TableHead>File Size</TableHead>
-                      <TableHead>Status</TableHead>
+                      {isAdmin && <TableHead>Status</TableHead>}
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -475,31 +566,35 @@ export default function FormLibrary() {
                         <TableCell className="font-medium">
                           {document.fileName}
                         </TableCell>
-                        <TableCell>
-                          {document.internalUsers && document.internalUsers.length > 0 ? (
-                            <span className="text-sm text-foreground">
-                              {document.internalUsers[0].email}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {document.externalUsers && document.externalUsers.length > 0 ? (
-                            <span className="text-sm text-foreground">
-                              {document.externalUsers[0].email}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+                        {isAdmin && (
+                          <TableCell>
+                            {document.internalUsers && document.internalUsers.length > 0 ? (
+                              <span className="text-sm text-foreground">
+                                {document.internalUsers[0].email}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        )}
+                        {isAdmin && (
+                          <TableCell>
+                            {document.externalUsers && document.externalUsers.length > 0 ? (
+                              <span className="text-sm text-foreground">
+                                {document.externalUsers[0].email}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell>
                           {formatDistanceToNow(new Date(document.lastUpdatedAt), {
                             addSuffix: true,
                           })}
                         </TableCell>
                         <TableCell>{formatFileSize(document.fileSize)}</TableCell>
-                        <TableCell>{getStatusBadge(document.status)}</TableCell>
+                        {isAdmin && <TableCell>{getStatusBadge(document.status)}</TableCell>}
                         <TableCell className="text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

@@ -49,6 +49,7 @@ import ReceivedDocuments from "./pages/ReceivedDocuments";
 import FormBuilder from "./pages/FormBuilder";
 import FormLibrary from "./pages/FormLibrary";
 import FormSignatures from "./pages/FormSignatures";
+import FormSign from "./pages/FormSign";
 
 // Profile
 import Profile from "./pages/Profile";
@@ -179,7 +180,7 @@ const App = () => (
                   </AdminRoute>
                 } 
               />
-              <Route path="/forms/sign/:id" element={<FormLibrary />} />
+              <Route path="/forms/sign/:id" element={<FormSign />} />
 
               {/* Profile */}
               <Route path="/profile" element={<Profile />} />

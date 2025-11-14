@@ -45,6 +45,10 @@ export default function Login() {
       if (response.success && response.data) {
         // Update user context
         login(response.data.username, response.data.role);
+        
+        // Dispatch custom event to trigger UserContext reload from localStorage
+        // This ensures the context gets the latest user data after login
+        window.dispatchEvent(new Event('userDataChanged'));
 
         toast({
           title: "Login Successful",
