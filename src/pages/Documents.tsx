@@ -358,6 +358,8 @@ export default function Documents() {
     
     try {
       setSharing(true);
+      
+      // First, share the target resource (file or folder)
       const response = await documentService.shareResource(shareTargetType, shareTargetId, {
         internal: internal.length > 0 ? internal : undefined,
         external: external.length > 0 ? external : undefined
@@ -365,15 +367,53 @@ export default function Documents() {
       
       if (response.success && response.data) {
         setPublicUrl(response.data.publicUrl || null);
+        
+        // If sharing a file, also automatically share the parent folder with the same staff
+        if (shareTargetType === "file" && internal.length > 0) {
+          try {
+            // Find the file to get its folderId
+            const file = files.find(f => f.id === shareTargetId);
+            if (file && file.folderId) {
+              // Share the parent folder with the same internal staff
+              await documentService.shareResource("folder", file.folderId, {
+                internal: internal, // Same staff members
+                external: external.length > 0 ? external : undefined
+              });
+              
+              console.log(`✅ Parent folder ${file.folderId} also shared with staff`);
+            }
+          } catch (folderShareError: any) {
+            // Log error but don't fail the main share operation
+            console.warn("Failed to auto-share parent folder:", folderShareError);
+            toast({
+              variant: "default",
+              title: "File Shared",
+              description: "File shared successfully, but parent folder sharing failed. Please share the folder manually."
+            });
+          }
+        }
+        
         toast({
           title: "Shared Successfully",
-          description: external.length > 0 
+          description: shareTargetType === "file" && internal.length > 0
+            ? "File and parent folder shared successfully with staff"
+            : external.length > 0 
             ? "Public URL generated. You can copy it from the dialog."
             : "Resource shared successfully"
         });
-        if (external.length === 0 && internal.length === 0) {
+        
+        // Reload folders and files to reflect the changes
+        await loadData();
+        
+        // Close modal after successful share
+        // Only keep it open if there's a public URL to copy (external sharing)
+        if (external.length === 0 || !response.data?.publicUrl) {
           setIsShareOpen(false);
           setShareTargetId(null);
+          // Reset share state
+          setInternal([]);
+          setExternal([]);
+          setPublicUrl(null);
         }
       }
     } catch (error: any) {
