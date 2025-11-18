@@ -74,6 +74,11 @@ const menuItems = [
     icon: Users,
   },
   {
+    title: "Admin Management",
+    url: "/admin",
+    icon: Shield,
+  },
+  {
     title: "Notifications",
     url: "/notifications",
     icon: Bell,
@@ -159,6 +164,9 @@ export function AppSidebar() {
     if (!isAdmin) {
       // Hide Staff Management for staff
       if (item.title === "Staff Management") return false;
+      
+      // Hide Admin Management for staff
+      if (item.title === "Admin Management") return false;
       
       // Hide Notifications for staff
       if (item.title === "Notifications") return false;

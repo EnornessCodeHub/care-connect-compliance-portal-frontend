@@ -19,6 +19,9 @@ import NADOAssistant from "./pages/NADOAssistant";
 // Staff Management
 import Staff from "./pages/Staff";
 
+// Admin Management
+import Admin from "./pages/Admin";
+
 // Notifications
 import Notifications from "./pages/Notifications";
 import ViewNotifications from "./pages/ViewNotifications";
@@ -113,6 +116,16 @@ const App = () => (
                 } 
               />
               <Route path="/team" element={<Staff />} /> {/* Redirect old route */}
+
+              {/* Admin Management */}
+              <Route 
+                path="/admin" 
+                element={
+                  <AdminRoute>
+                    <Admin />
+                  </AdminRoute>
+                } 
+              />
 
               {/* Notifications */}
               <Route 

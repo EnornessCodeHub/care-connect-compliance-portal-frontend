@@ -15,7 +15,8 @@ import {
   GraduationCap,
   FileText,
   CheckSquare,
-  Loader2
+  Loader2,
+  Shield
 } from "lucide-react";
 
 const Index = () => {
@@ -89,6 +90,14 @@ const Index = () => {
       icon: Users,
       color: "bg-blue-500",
       route: "/staff",
+      adminOnly: true
+    },
+    {
+      title: "Admin Management",
+      description: "Manage admin members and roles",
+      icon: Shield,
+      color: "bg-indigo-500",
+      route: "/admin",
       adminOnly: true
     },
     {
