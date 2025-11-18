@@ -1,23 +1,35 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure worker for pdfjs-dist
-// Try local worker first (from public folder), fallback to CDN
-const workerUrl = '/workers/pdf.worker.min.mjs';
-
-// Check if local worker exists, otherwise use CDN
-fetch(workerUrl, { method: 'HEAD' })
-  .then(() => {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-    console.log('✅ Using local pdfjs worker');
-  })
-  .catch(() => {
-    // Fallback to unpkg CDN
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-    console.log('✅ Using CDN pdfjs worker');
-  });
-
-// Set initial worker (will be replaced by async check above)
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+// CRITICAL: Worker version MUST match the API version exactly
+// Using CDN with exact version to ensure compatibility in production
+if (typeof window !== 'undefined') {
+  // Get the exact version from the installed package
+  const pdfjsVersion = pdfjsLib.version;
+  
+  // Use CDN with exact version pinning to ensure version match
+  // This is the most reliable approach for production
+  const workerUrl = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`;
+  
+  // Set worker URL
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+  
+  // Verify worker is set correctly
+  if (pdfjsLib.GlobalWorkerOptions.workerSrc !== workerUrl) {
+    console.warn('⚠️ Worker URL was not set correctly');
+  }
+  
+  console.log(`✅ PDF.js worker configured`);
+  console.log(`   API Version: ${pdfjsVersion}`);
+  console.log(`   Worker URL: ${workerUrl}`);
+  
+  // Test worker loading (optional, for debugging)
+  if (process.env.NODE_ENV === 'development') {
+    fetch(workerUrl, { method: 'HEAD' })
+      .then(() => console.log('✅ Worker file is accessible'))
+      .catch((err) => console.warn('⚠️ Worker file check failed:', err));
+  }
+}
 
 export interface PDFConversionOptions {
   dpi?: number;
@@ -97,7 +109,23 @@ export async function convertPDFToImages(
 
   } catch (error) {
     console.error('❌ PDF conversion failed:', error);
-    throw new Error(`Failed to convert PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    
+    // Check for version mismatch errors
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (errorMessage.includes('version') && errorMessage.includes('does not match')) {
+      const versionMismatchError = new Error(
+        `PDF.js version mismatch detected. API version: ${pdfjsLib.version}. ` +
+        `Please ensure the worker version matches. Worker URL: ${pdfjsLib.GlobalWorkerOptions.workerSrc}`
+      );
+      console.error('Version mismatch details:', {
+        apiVersion: pdfjsLib.version,
+        workerUrl: pdfjsLib.GlobalWorkerOptions.workerSrc,
+        originalError: errorMessage
+      });
+      throw versionMismatchError;
+    }
+    
+    throw new Error(`Failed to convert PDF: ${errorMessage}`);
   }
 }
 
@@ -170,7 +198,23 @@ export async function convertPDFFileToImages(
 
   } catch (error) {
     console.error('❌ PDF conversion failed:', error);
-    throw new Error(`Failed to convert PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    
+    // Check for version mismatch errors
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (errorMessage.includes('version') && errorMessage.includes('does not match')) {
+      const versionMismatchError = new Error(
+        `PDF.js version mismatch detected. API version: ${pdfjsLib.version}. ` +
+        `Please ensure the worker version matches. Worker URL: ${pdfjsLib.GlobalWorkerOptions.workerSrc}`
+      );
+      console.error('Version mismatch details:', {
+        apiVersion: pdfjsLib.version,
+        workerUrl: pdfjsLib.GlobalWorkerOptions.workerSrc,
+        originalError: errorMessage
+      });
+      throw versionMismatchError;
+    }
+    
+    throw new Error(`Failed to convert PDF: ${errorMessage}`);
   }
 }
 
