@@ -8,10 +8,16 @@ import authService from '@/services/authService';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
+interface CourseWithProgress extends courseService.Course {
+  progress?: number;
+  isCompleted?: boolean;
+}
+
 const Training = () => {
   const { toast } = useToast();
-  const [courses, setCourses] = useState<courseService.Course[]>([]);
+  const [courses, setCourses] = useState<CourseWithProgress[]>([]);
   const [loading, setLoading] = useState(false);
+  const [progressLoading, setProgressLoading] = useState(false);
 
   useEffect(() => {
     loadCourses();
@@ -22,6 +28,11 @@ const Training = () => {
       setLoading(true);
       const user = authService.getUserData();
       
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      
       // If staff, fetch only assigned courses
       const params = user?.role === 'staff' 
         ? { assignedTo: user.id, status: 'all' }
@@ -30,6 +41,11 @@ const Training = () => {
       const response = await courseService.getAllCourses(params);
       if (response.success && response.data) {
         setCourses(response.data);
+        
+        // Load progress for each course if user is staff
+        if (user.role === 'staff') {
+          loadCourseProgress(response.data, user.id);
+        }
       }
     } catch (error: any) {
       toast({
@@ -39,6 +55,56 @@ const Training = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCourseProgress = async (coursesList: courseService.Course[], userId: number) => {
+    try {
+      setProgressLoading(true);
+      
+      // Fetch progress for all courses in parallel
+      const progressPromises = coursesList.map(async (course) => {
+        try {
+          const progressResponse = await courseService.getUserCourseProgress(course.id, userId);
+          if (progressResponse.success && progressResponse.data) {
+            return {
+              courseId: course.id,
+              progress: progressResponse.data.progress_percentage || 0,
+              isCompleted: progressResponse.data.is_completed || false
+            };
+          }
+        } catch (error) {
+          console.warn(`Failed to load progress for course ${course.id}:`, error);
+          return {
+            courseId: course.id,
+            progress: 0,
+            isCompleted: false
+          };
+        }
+        return {
+          courseId: course.id,
+          progress: 0,
+          isCompleted: false
+        };
+      });
+
+      const progressResults = await Promise.all(progressPromises);
+      
+      // Update courses with progress data
+      setCourses(prevCourses => 
+        prevCourses.map(course => {
+          const progressData = progressResults.find(p => p.courseId === course.id);
+          return {
+            ...course,
+            progress: progressData?.progress || 0,
+            isCompleted: progressData?.isCompleted || false
+          };
+        })
+      );
+    } catch (error: any) {
+      console.error('Error loading course progress:', error);
+    } finally {
+      setProgressLoading(false);
     }
   };
 
@@ -91,11 +157,22 @@ const Training = () => {
               <CardContent className="space-y-3">
                 <p className="text-sm text-muted-foreground line-clamp-2">{c.description || 'No description'}</p>
                 <div>
-                  <Progress value={0} className="h-2" />
-                  <div className="text-xs text-right text-muted-foreground mt-1">0%</div>
+                  <Progress 
+                    value={c.progress !== undefined ? c.progress : 0} 
+                    className="h-2" 
+                  />
+                  <div className="text-xs text-right text-muted-foreground mt-1">
+                    {progressLoading ? (
+                      <span className="text-muted-foreground">Loading...</span>
+                    ) : (
+                      `${c.progress !== undefined ? c.progress : 0}%`
+                    )}
+                  </div>
                 </div>
                 <Button asChild className="w-full">
-                  <Link to={`/course/${c.id}`}>Continue to course</Link>
+                  <Link to={`/course/${c.id}`}>
+                    {c.isCompleted ? 'View Course' : 'Continue to course'}
+                  </Link>
                 </Button>
               </CardContent>
             </Card>
