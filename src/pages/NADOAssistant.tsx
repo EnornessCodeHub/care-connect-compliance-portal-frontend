@@ -4,20 +4,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { 
-  Bot, 
-  Send, 
+import {
+  Bot,
+  Send,
   MessageSquare,
-  AlertCircle,
   Loader2,
   Eye,
-  Download,
-  FileText
+  FileText,
+  Paperclip,
+  X
 } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import { useToast } from '@/hooks/use-toast';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import authService from '@/services/authService';
 
 interface Citation {
   documentId: string;
@@ -26,6 +26,8 @@ interface Citation {
   filePath: string;
   fileType: string;
   similarity: number;
+  source?: 'client' | 'global';
+  viewUrl?: string;
 }
 
 interface ChatMessage {
@@ -37,6 +39,7 @@ interface ChatMessage {
   isStreaming?: boolean;
   disclaimer?: string;
   citations?: Citation[];
+  fileName?: string;
 }
 
 // Quick links removed
@@ -65,47 +68,153 @@ export default function NADOAssistant() {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [thinkingStatus, setThinkingStatus] = useState<string>('');
-  const [currentDisclaimer, setCurrentDisclaimer] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const sessionIdRef = useRef<string>('');
 
-  const handleSendMessage = async (content: string) => {
-    if (!content.trim() || isTyping) return;
+  const ensureSessionId = () => {
+    if (!sessionIdRef.current) {
+      sessionIdRef.current =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `session-${Date.now()}`;
+    }
+    return sessionIdRef.current;
+  };
+
+  const resetFileInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const validateFile = (file: File) => {
+    const allowedExtensions = ['pdf', 'doc', 'docx'];
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    const extension = file.name.split('.').pop()?.toLowerCase();
+
+    if (!extension || !allowedExtensions.includes(extension)) {
+      throw new Error('Only PDF, DOC, and DOCX files are allowed.');
+    }
+
+    if (file.size > maxSize) {
+      throw new Error('File size must be less than 10MB.');
+    }
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      validateFile(file);
+      setSelectedFile(file);
+      // Pre-fill input with review message
+      setInputValue('Review this document for compliance and quality');
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid File',
+        description: error.message || 'Unable to attach file.'
+      });
+      resetFileInput();
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    resetFileInput();
+    // Clear input when file is removed
+    setInputValue('');
+  };
+
+  const handleSendMessage = async (content: string, attachmentOverride?: File | null) => {
+    const trimmedContent = content.trim();
+    if (!trimmedContent || isTyping) return;
+
+    const attachment = attachmentOverride ?? selectedFile;
+
+    if (attachment) {
+      try {
+        validateFile(attachment);
+      } catch (error: any) {
+        toast({
+          variant: 'destructive',
+          title: 'Invalid File',
+          description: error.message || 'Unable to attach file.'
+        });
+        return;
+      }
+    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       type: 'user',
-      content: content.trim(),
-      timestamp: new Date()
+      content: trimmedContent,
+      timestamp: new Date(),
+      fileName: attachment?.name
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsTyping(true);
     setThinkingStatus('Connecting...');
-    setCurrentDisclaimer('');
 
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
 
     try {
       // Prepare conversation history for API
-      const history = messages.map(msg => ({
+      const history = [...messages, userMessage].map(msg => ({
         role: msg.type === 'user' ? 'user' : 'assistant',
         content: msg.content
       }));
 
-      const response = await fetch(`${import.meta.env.VITE_BASE_URL}/bot/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: content.trim(),
-          history: history
-        }),
-        signal: abortControllerRef.current.signal
-      });
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const sessionId = ensureSessionId();
+      const token = authService.getToken();
+
+      let requestOptions: RequestInit;
+
+      if (attachment) {
+        const formData = new FormData();
+        formData.append('message', trimmedContent);
+        formData.append('attachment', attachment);
+        formData.append('history', JSON.stringify(history));
+        formData.append('timezone', timezone);
+        formData.append('sessionId', sessionId);
+
+        requestOptions = {
+          method: 'POST',
+          headers: {
+            'x-access-token': token || ''
+          },
+          body: formData,
+          signal: abortControllerRef.current.signal
+        };
+
+        setSelectedFile(null);
+        resetFileInput();
+      } else {
+        requestOptions = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-access-token': token || ''
+          },
+          body: JSON.stringify({
+            message: trimmedContent,
+            history,
+            sessionId,
+            timezone
+          }),
+          signal: abortControllerRef.current.signal
+        };
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_BASE_URL}/bot/chat/stream`, requestOptions);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -123,6 +232,7 @@ export default function NADOAssistant() {
       let messageDisclaimer = '';
       let messageCitations: Citation[] = [];
       let currentEvent = '';
+      let streamingErrored = false;
 
       // Create initial streaming message
       const initialMessage: ChatMessage = {
@@ -174,9 +284,183 @@ export default function NADOAssistant() {
 
             try {
               const data = JSON.parse(dataStr);
+              
+              // PRIORITY: Handle token data first, regardless of event type
+              // Token chunks come without an event: line, so we need to check data.token first
+              if (data.token) {
+                accumulatedContent += data.token;
+                setMessages(prev =>
+                  prev.map(msg =>
+                    msg.id === streamingMessageId
+                      ? { ...msg, content: accumulatedContent }
+                      : msg
+                  )
+                );
+                // Clear currentEvent after handling token to prevent it from being reused
+                currentEvent = '';
+                continue;
+              }
 
-              // Handle citations event
-              if (currentEvent === 'citations' && data.citations && Array.isArray(data.citations)) {
+              const eventType = currentEvent || data.event || '';
+
+              switch (eventType) {
+                case 'thinking': {
+                  setThinkingStatus(data.message || data.status || 'Processing document...');
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'token': {
+                  const chunk = data.token || '';
+                  if (chunk) {
+                    accumulatedContent += chunk;
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === streamingMessageId
+                          ? { ...msg, content: accumulatedContent }
+                          : msg
+                      )
+                    );
+                  }
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'message': {
+                  const chunk = data.content ?? data.token ?? '';
+                  if (chunk) {
+                    accumulatedContent += chunk;
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === streamingMessageId
+                          ? { ...msg, content: accumulatedContent }
+                          : msg
+                      )
+                    );
+                  }
+                  if (data.disclaimer) {
+                    messageDisclaimer = data.disclaimer;
+                  }
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'citations': {
+                  if (Array.isArray(data.citations)) {
+                    messageCitations = data.citations;
+                    // Debug: Log citations to see structure
+                    console.log('Citations received:', data.citations);
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === streamingMessageId
+                          ? { ...msg, citations: messageCitations }
+                          : msg
+                      )
+                    );
+                  }
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'disclaimer': {
+                  if (data.text) {
+                    messageDisclaimer = data.text;
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === streamingMessageId
+                          ? { ...msg, disclaimer: messageDisclaimer }
+                          : msg
+                      )
+                    );
+                  }
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'end': {
+                  // Handle end event - stream is complete
+                  setIsTyping(false);
+                  setThinkingStatus('');
+                  setMessages(prev =>
+                    prev.map(msg =>
+                      msg.id === streamingMessageId
+                        ? {
+                            ...msg,
+                            isStreaming: false,
+                            disclaimer: messageDisclaimer || undefined,
+                            citations: messageCitations.length > 0 ? messageCitations : undefined
+                          }
+                        : msg
+                    )
+                  );
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'done': {
+                  messageDisclaimer = data.disclaimer || messageDisclaimer;
+                  if (Array.isArray(data.citations)) {
+                    messageCitations = data.citations;
+                  }
+                  setIsTyping(false);
+                  setThinkingStatus('');
+                  setMessages(prev =>
+                    prev.map(msg =>
+                      msg.id === streamingMessageId
+                        ? {
+                            ...msg,
+                            isStreaming: false,
+                            disclaimer: messageDisclaimer || undefined,
+                            citations: messageCitations.length > 0 ? messageCitations : undefined
+                          }
+                        : msg
+                    )
+                  );
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'error': {
+                  streamingErrored = true;
+                  setIsTyping(false);
+                  setThinkingStatus('');
+                  const errorMessage = data.error || 'An error occurred while processing the document.';
+                  setMessages(prev =>
+                    prev.map(msg =>
+                      msg.id === streamingMessageId
+                        ? { ...msg, isStreaming: false, content: errorMessage }
+                        : msg
+                    )
+                  );
+                  toast({
+                    variant: 'destructive',
+                    title: 'Document Review Error',
+                    description: errorMessage
+                  });
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                case 'history': {
+                  if (data.history) {
+                    console.debug('Conversation history update:', data.history);
+                  }
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+                default: {
+                  if (data.status) {
+                    setThinkingStatus(data.message || data.status);
+                  }
+                  // Handle content in default case (tokens are already handled above)
+                  if (data.content && !data.token) {
+                    accumulatedContent += data.content;
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === streamingMessageId
+                          ? { ...msg, content: accumulatedContent }
+                          : msg
+                      )
+                    );
+                  }
+                  currentEvent = ''; // Clear after processing
+                  break;
+                }
+              }
+
+              if (!eventType && data.citations && Array.isArray(data.citations)) {
                 messageCitations = data.citations;
                 setMessages(prev => 
                   prev.map(msg => 
@@ -185,41 +469,30 @@ export default function NADOAssistant() {
                       : msg
                   )
                 );
-                continue;
               }
 
-              // Handle thinking status
-              if (data.status) {
-                setThinkingStatus(data.message || data.status);
-              }
-
-              // Handle disclaimer
-              if (data.text && !data.token) {
-                messageDisclaimer = data.text;
-                setCurrentDisclaimer(data.text);
-              }
-
-              // Handle token streaming
-              if (data.token) {
-                accumulatedContent += data.token;
-                setMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === streamingMessageId 
-                      ? { ...msg, content: accumulatedContent }
-                      : msg
-                  )
-                );
-              }
-
-              // Handle history (optional - could be used for debugging)
-              if (data.history) {
-                console.log('Conversation history:', data.history);
-              }
             } catch (e) {
               console.warn('Failed to parse SSE data:', dataStr);
             }
           }
         }
+      }
+
+      if (!streamingErrored) {
+        setIsTyping(false);
+        setThinkingStatus('');
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === streamingMessageId
+              ? {
+                  ...msg,
+                  isStreaming: false,
+                  disclaimer: messageDisclaimer || undefined,
+                  citations: messageCitations.length > 0 ? messageCitations : undefined
+                }
+              : msg
+          )
+        );
       }
     } catch (error: any) {
       console.error('Error streaming chat:', error);
@@ -282,14 +555,74 @@ export default function NADOAssistant() {
   // Quick links removed
 
   const handleSuggestedQuestion = (question: string) => {
-    handleSendMessage(question);
+    handleSendMessage(question, null);
   };
 
-  const handleViewCitation = async (filePath: string, fileName: string) => {
+  const handleViewCitation = async (citation: Citation) => {
     try {
-      const url = `${import.meta.env.VITE_BASE_URL}/bot/references/view?filePath=${encodeURIComponent(filePath)}`;
-      window.open(url, '_blank');
+      // Use viewUrl if available (provided by backend)
+      if (citation.viewUrl) {
+        const token = authService.getToken();
+        
+        // Backend sends relative path, so combine with base URL
+        let url = citation.viewUrl.startsWith('http') 
+          ? citation.viewUrl 
+          : `${import.meta.env.VITE_BASE_URL}${citation.viewUrl}`;
+        
+        // Add authentication token as query parameter since window.open doesn't send headers
+        if (token) {
+          const separator = url.includes('?') ? '&' : '?';
+          url = `${url}${separator}token=${encodeURIComponent(token)}`;
+        }
+        
+        // Direct window.open - browser will handle CORS and PDF viewing
+        const newWindow = window.open(url, '_blank');
+        
+        if (!newWindow) {
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: "Please allow popups to view the file"
+          });
+        }
+        return;
+      }
+
+      // Fallback: construct URL manually if viewUrl not provided
+      const token = authService.getToken();
+      if (!token) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Authentication required. Please login again."
+        });
+        return;
+      }
+
+      const identifier = citation.documentId || citation.filePath;
+      
+      if (!identifier) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "File identifier is not available"
+        });
+        return;
+      }
+
+      const url = `${import.meta.env.VITE_BASE_URL}/bot/references/view?filePath=${encodeURIComponent(identifier)}`;
+      
+      const newWindow = window.open(url, '_blank');
+      
+      if (!newWindow) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Please allow popups to view the file"
+        });
+      }
     } catch (error: any) {
+      console.error('Error viewing citation:', error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -397,14 +730,26 @@ export default function NADOAssistant() {
                                 </>
                               )}
                             </div>
+                            {message.fileName && (
+                              <div
+                                className={`mt-2 text-xs flex items-center gap-1 ${
+                                  message.type === 'user'
+                                    ? 'text-primary-foreground/80'
+                                    : 'text-muted-foreground'
+                                }`}
+                              >
+                                <Paperclip className="h-3 w-3" />
+                                <span className="truncate">{message.fileName}</span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Per-message disclaimer */}
-                          {message.disclaimer && !message.isStreaming && (
+                          {/* {message.disclaimer && !message.isStreaming && (
                             <div className="text-xs text-muted-foreground bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded p-2">
                               ⚠️ {message.disclaimer}
                             </div>
-                          )}
+                          )} */}
 
                           {/* Citations section */}
                           {message.citations && message.citations.length > 0 && !message.isStreaming && (
@@ -424,31 +769,29 @@ export default function NADOAssistant() {
                                           <Badge variant="outline" className="text-xs">
                                             {citation.fileType.toUpperCase()}
                                           </Badge>
-                                          {citation.category && (
-                                            <span className="truncate">{citation.category}</span>
-                                          )}
+                                          <span className="truncate">
+                                            {citation.source === 'global' 
+                                              ? 'Global Documents' 
+                                              : citation.source === 'client'
+                                              ? 'Client Documents'
+                                              : citation.category || 'Documents'}
+                                          </span>
                                         </div>
                                       </div>
                                     </div>
                                     <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 px-2"
-                                        onClick={() => handleViewCitation(citation.filePath, citation.displayName)}
-                                        title="View file"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 px-2"
-                                        onClick={() => handleDownloadCitation(citation.filePath, citation.displayName)}
-                                        title="Download file"
-                                      >
-                                        <Download className="h-4 w-4" />
-                                      </Button>
+                                      {(citation.fileType?.toLowerCase() === 'pdf' || 
+                                        citation.displayName?.toLowerCase().endsWith('.pdf')) && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-8 px-2"
+                                          onClick={() => handleViewCitation(citation)}
+                                          title="View PDF file"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                      )}
                                     </div>
                                   </div>
                                 ))}
@@ -477,19 +820,63 @@ export default function NADOAssistant() {
                 {/* Input Area */}
                 <div className="p-3 sm:p-4 border-t sticky bottom-0 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
                   <div className="flex gap-2">
-                    <Input
-                      value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
-                      placeholder="Ask NADO anything..."
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage(inputValue)}
-                      className="flex-1"
-                    />
-                    <Button 
-                      onClick={() => handleSendMessage(inputValue)}
-                      disabled={!inputValue.trim() || isTyping}
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
+                    <div className="flex flex-col gap-3 w-full">
+                      {selectedFile && (
+                        <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/40 rounded-md px-2 py-1.5">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="font-medium truncate">📄 {selectedFile.name}</span>
+                            <span className="text-xs">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5"
+                            onClick={handleRemoveFile}
+                            disabled={isTyping}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="justify-center sm:w-auto"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isTyping}
+                        >
+                          <Paperclip className="h-4 w-4 mr-2" />
+                          Attach Document
+                        </Button>
+                        <Input
+                          value={inputValue}
+                          onChange={(e) => setInputValue(e.target.value)}
+                          placeholder="Ask NADO anything..."
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendMessage(inputValue);
+                            }
+                          }}
+                          className="flex-1"
+                          disabled={isTyping}
+                        />
+                        <Button
+                          onClick={() => handleSendMessage(inputValue)}
+                          disabled={!inputValue.trim() || isTyping}
+                        >
+                          <Send className="h-4 w-4" />
+                        </Button>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".pdf,.doc,.docx"
+                          className="hidden"
+                          onChange={handleFileChange}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </CardContent>
