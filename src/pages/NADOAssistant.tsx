@@ -112,7 +112,7 @@ export default function NADOAssistant() {
       validateFile(file);
       setSelectedFile(file);
       // Pre-fill input with review message
-      setInputValue('Review this document for compliance and quality');
+      setInputValue('Review this document for quality and completion and provide suggestions');
     } catch (error: any) {
       toast({
         variant: 'destructive',
@@ -839,29 +839,31 @@ export default function NADOAssistant() {
                         </div>
                       )}
                       <div className="flex flex-col gap-2 sm:flex-row">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="justify-center sm:w-auto"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isTyping}
-                        >
-                          <Paperclip className="h-4 w-4 mr-2" />
-                          Attach Document
-                        </Button>
-                        <Input
-                          value={inputValue}
-                          onChange={(e) => setInputValue(e.target.value)}
-                          placeholder="Ask NADO anything..."
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              handleSendMessage(inputValue);
-                            }
-                          }}
-                          className="flex-1"
-                          disabled={isTyping}
-                        />
+                        <div className="relative flex-1">
+                          <Input
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            placeholder="Ask NADO anything..."
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSendMessage(inputValue);
+                              }
+                            }}
+                            className="flex-1 pr-10"
+                            disabled={isTyping}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 hover:bg-muted z-10 text-foreground hover:text-foreground"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isTyping}
+                          >
+                            <Paperclip className="h-4 w-4" />
+                          </Button>
+                        </div>
                         <Button
                           onClick={() => handleSendMessage(inputValue)}
                           disabled={!inputValue.trim() || isTyping}
