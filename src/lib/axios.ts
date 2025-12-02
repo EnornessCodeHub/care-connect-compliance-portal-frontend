@@ -56,11 +56,17 @@ api.interceptors.request.use(
       config.headers['x-access-token'] = token;
     }
     
+    // If FormData is being sent, remove Content-Type header to let browser set it with boundary
+    if (config.data instanceof FormData) {
+      delete config.headers?.['Content-Type'];
+    }
+    
     // Skip duplicate prevention for file uploads and certain endpoints
     const skipDuplicateCheck = 
       config.url?.includes('/upload') || 
       config.url?.includes('/stream') ||
-      config.headers?.['Content-Type']?.includes('multipart/form-data');
+      config.url?.includes('/notifications') ||
+      config.data instanceof FormData;
     
     if (!skipDuplicateCheck) {
       const requestKey = getRequestKey(config);

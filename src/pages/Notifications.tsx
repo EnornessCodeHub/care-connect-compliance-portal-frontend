@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { Search, Plus, X, Loader2, RefreshCw } from 'lucide-react';
+import { Search, Plus, X, Loader2, RefreshCw, UploadCloud, Link as LinkIcon, File, Trash2 } from 'lucide-react';
 import staffService, { Staff } from '@/services/staffService';
 import notificationService, { NotificationItem } from '@/services/notificationService';
 import { useToast } from '@/hooks/use-toast';
@@ -28,6 +28,12 @@ const Notifications = () => {
   const [message, setMessage] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // attachment state
+  const [attachmentLink, setAttachmentLink] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Load notifications on mount
   useEffect(() => {
@@ -87,21 +93,145 @@ const Notifications = () => {
     setTitle('');
     setMessage('');
     setSelectedUsers([]);
+    setAttachmentLink('');
+    setAttachmentFile(null);
+    setDragActive(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const toggleUser = (id: number) => {
     setSelectedUsers(prev => (prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]));
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type - only allow: docx, pdf, png, jpeg
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
+        'image/png',
+        'image/jpeg',
+        'image/jpg'
+      ];
+      
+      const allowedExtensions = ['.pdf', '.docx', '.png', '.jpeg', '.jpg'];
+      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+      
+      if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
+        toast({
+          variant: "destructive",
+          title: "Invalid File Type",
+          description: "Only DOCX, PDF, PNG, and JPEG files are allowed"
+        });
+        // Reset file input
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+      
+      // Validate file size (max 10MB)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (file.size > maxSize) {
+        toast({
+          variant: "destructive",
+          title: "File Too Large",
+          description: "File size must be less than 10MB"
+        });
+        // Reset file input
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+      setAttachmentFile(file);
+    }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      // Validate file type - only allow: docx, pdf, png, jpeg
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
+        'image/png',
+        'image/jpeg',
+        'image/jpg'
+      ];
+      
+      const allowedExtensions = ['.pdf', '.docx', '.png', '.jpeg', '.jpg'];
+      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+      
+      if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
+        toast({
+          variant: "destructive",
+          title: "Invalid File Type",
+          description: "Only DOCX, PDF, PNG, and JPEG files are allowed"
+        });
+        return;
+      }
+      
+      // Validate file size (max 10MB)
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (file.size > maxSize) {
+        toast({
+          variant: "destructive",
+          title: "File Too Large",
+          description: "File size must be less than 10MB"
+        });
+        return;
+      }
+      setAttachmentFile(file);
+    }
+  };
+
+  const removeAttachmentFile = () => {
+    setAttachmentFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleCreate = async () => {
     if (!title.trim() || !message.trim() || selectedUsers.length === 0) return;
     setIsSubmitting(true);
     try {
-      const response = await notificationService.createNotification({
+      const requestData: any = {
         user_ids: selectedUsers,
         title: title.trim(),
         message: message.trim(),
-      });
+      };
+
+      // Add attachment link if provided
+      if (attachmentLink.trim()) {
+        requestData.attachment_link = attachmentLink.trim();
+      }
+
+      // Add attachment file if provided
+      if (attachmentFile) {
+        requestData.attachment_file = attachmentFile;
+        requestData.attachment_file_name = attachmentFile.name;
+      }
+
+      const response = await notificationService.createNotification(requestData);
 
       if (response.success) {
         toast({
@@ -222,7 +352,7 @@ const Notifications = () => {
       </Card>
 
       <Dialog open={isOpen} onOpenChange={(o) => { setIsOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Notification</DialogTitle>
           </DialogHeader>
@@ -305,12 +435,93 @@ const Notifications = () => {
                 </PopoverContent>
               </Popover>
             </div>
+
+            {/* Attachments Section */}
+            <div className="space-y-3 pt-2 border-t">
+              <Label className="text-base font-semibold">Attachments (Optional)</Label>
+              
+              {/* Attach Link */}
+              <div className="space-y-2">
+                <Label htmlFor="n-link" className="text-sm font-normal flex items-center gap-2">
+                  <LinkIcon className="h-4 w-4" />
+                  Attach Link
+                </Label>
+                <Input
+                  id="n-link"
+                  type="url"
+                  value={attachmentLink}
+                  onChange={(e) => setAttachmentLink(e.target.value)}
+                  placeholder="https://example.com"
+                  className="w-full"
+                />
+              </div>
+
+              {/* Attach Document */}
+              <div className="space-y-2">
+                <Label className="text-sm font-normal flex items-center gap-2">
+                  <File className="h-4 w-4" />
+                  Attach Document
+                </Label>
+                {attachmentFile ? (
+                  <div className="flex items-center justify-between p-3 border rounded-md bg-muted/50">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <File className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{attachmentFile.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(attachmentFile.size / 1024).toFixed(1)} KB
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 flex-shrink-0"
+                      onClick={removeAttachmentFile}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    onDragEnter={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDragOver={handleDrag}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={cn(
+                      "border-2 border-dashed rounded-md p-6 text-center cursor-pointer transition-colors",
+                      dragActive ? "border-primary bg-primary/5" : "border-muted hover:border-primary/50"
+                    )}
+                  >
+                    <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+                    <div className="text-sm font-medium mb-1">Click or drag file to upload</div>
+                    <div className="text-xs text-muted-foreground">Allowed: DOCX, PDF, PNG, JPEG • Max size: 10MB</div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                      accept=".pdf,.docx,.png,.jpeg,.jpg"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <DialogFooter className="gap-2">
             <Button variant="ghost" onClick={() => { setIsOpen(false); resetForm(); }}>Cancel</Button>
             <Button onClick={handleCreate} disabled={isSubmitting || !title.trim() || !message.trim() || selectedUsers.length === 0}>
-              Add
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Sending...
+                </>
+              ) : (
+                'Add'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

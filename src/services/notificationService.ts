@@ -28,6 +28,9 @@ export interface CreateNotificationRequest {
   user_ids: number[];
   title: string;
   message: string;
+  attachment_link?: string; // External URL
+  attachment_file?: File | string; // File object or base64 string
+  attachment_file_name?: string; // Original file name
 }
 
 export interface NotificationListResponse {
@@ -50,6 +53,9 @@ export interface UserNotification {
   message: string;
   is_read: boolean;
   status: boolean;
+  attachment_link?: string; // External URL
+  attachment_file?: string; // File URL or path
+  attachment_file_name?: string; // Original file name
   createdAt: string;
   updatedAt: string;
 }
@@ -83,7 +89,48 @@ class NotificationService {
    * Create a new notification
    */
   async createNotification(data: CreateNotificationRequest): Promise<NotificationResponse> {
-    const response = await api.post<NotificationResponse>('/notifications', data);
+    // If there's a file attachment or link, use FormData
+    const hasFile = data.attachment_file instanceof File;
+    const hasLink = !!(data.attachment_link && data.attachment_link.trim());
+    
+    if (hasFile || hasLink) {
+      const formData = new FormData();
+      formData.append('user_ids', JSON.stringify(data.user_ids));
+      formData.append('title', data.title);
+      formData.append('message', data.message);
+      
+      if (data.attachment_link && data.attachment_link.trim()) {
+        formData.append('attachment_link', data.attachment_link.trim());
+      }
+      
+      if (data.attachment_file instanceof File) {
+        formData.append('attachment_file', data.attachment_file);
+        if (data.attachment_file_name) {
+          formData.append('attachment_file_name', data.attachment_file_name);
+        } else {
+          formData.append('attachment_file_name', data.attachment_file.name);
+        }
+      } else if (typeof data.attachment_file === 'string') {
+        // If it's a base64 string
+        formData.append('attachment_file', data.attachment_file);
+        if (data.attachment_file_name) {
+          formData.append('attachment_file_name', data.attachment_file_name);
+        }
+      }
+      
+      // Don't set Content-Type header - let browser set it automatically with boundary
+      // Axios will detect FormData and handle it properly
+      const response = await api.post<NotificationResponse>('/notifications', formData);
+      return response.data;
+    }
+    
+    // For regular JSON request (no file or link)
+    const response = await api.post<NotificationResponse>('/notifications', {
+      user_ids: data.user_ids,
+      title: data.title,
+      message: data.message,
+      attachment_link: data.attachment_link
+    });
     return response.data;
   }
 
