@@ -134,7 +134,7 @@ export default function CourseManage() {
                           <Link to={`/course/${c.id}/chapters`}>Add Chapters</Link>
                         </Button>
                         <Button size="sm" variant="outline" asChild>
-                          <Link to={`/course/edit/${c.id}`}>Edit</Link>
+                          <Link to={`/course/edit/${c.id}`}>Edit Course</Link>
                         </Button>
                         <Button 
                           size="sm" 

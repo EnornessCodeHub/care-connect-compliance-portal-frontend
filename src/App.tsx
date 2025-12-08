@@ -35,6 +35,7 @@ import TrainingProgress from "./pages/TrainingProgress";
 import TrainingCertificates from "./pages/TrainingCertificates";
 import TrainingLibrary from "./pages/TrainingLibrary";
 import CourseManage from "./pages/CourseManage";
+import CourseBuilder from "./pages/CourseBuilder";
 import CourseForm from "./pages/CourseForm";
 import CourseContent from "./pages/CourseContent";
 import ChapterManage from "./pages/ChapterManage";
@@ -154,8 +155,8 @@ const App = () => (
               <Route path="/course/certificates" element={<TrainingCertificates />} />
               <Route path="/course/library" element={<TrainingLibrary />} />
               <Route path="/course/manage" element={<CourseManage />} />
-              <Route path="/course/create" element={<CourseForm />} />
-              <Route path="/course/edit/:id" element={<CourseForm />} />
+              <Route path="/course/create" element={<CourseBuilder />} />
+              <Route path="/course/edit/:id" element={<CourseBuilder />} />
               {/* Dynamic routes must come after static routes */}
               <Route path="/course/:id/chapters/:chapterId/lessons/:lessonId/edit" element={<LessonForm />} />
               <Route path="/course/:id/chapters/:chapterId/lessons" element={<LessonManage />} />
