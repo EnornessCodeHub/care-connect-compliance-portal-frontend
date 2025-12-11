@@ -38,10 +38,6 @@ import CourseManage from "./pages/CourseManage";
 import CourseBuilder from "./pages/CourseBuilder";
 import CourseForm from "./pages/CourseForm";
 import CourseContent from "./pages/CourseContent";
-import ChapterManage from "./pages/ChapterManage";
-import LessonManage from "./pages/LessonManage";
-import ChapterForm from "./pages/ChapterForm";
-import LessonForm from "./pages/LessonForm";
 
 // Document Center
 import Documents from "./pages/Documents";
@@ -158,10 +154,6 @@ const App = () => (
               <Route path="/course/create" element={<CourseBuilder />} />
               <Route path="/course/edit/:id" element={<CourseBuilder />} />
               {/* Dynamic routes must come after static routes */}
-              <Route path="/course/:id/chapters/:chapterId/lessons/:lessonId/edit" element={<LessonForm />} />
-              <Route path="/course/:id/chapters/:chapterId/lessons" element={<LessonManage />} />
-              <Route path="/course/:id/chapters/:chapterId/edit" element={<ChapterForm />} />
-              <Route path="/course/:id/chapters" element={<ChapterManage />} />
               <Route path="/course/:id" element={<CourseContent />} />
               {/* Legacy training routes - redirect to course */}
               <Route path="/training" element={<Training />} />
@@ -172,10 +164,6 @@ const App = () => (
               <Route path="/training/create" element={<CourseForm />} />
               <Route path="/training/edit/:id" element={<CourseForm />} />
               <Route path="/training/course/:id" element={<CourseContent />} />
-              <Route path="/training/:id/chapters" element={<ChapterManage />} />
-              <Route path="/training/:id/chapters/:chapterId/edit" element={<ChapterForm />} />
-              <Route path="/training/:id/chapters/:chapterId/lessons" element={<LessonManage />} />
-              <Route path="/training/:id/chapters/:chapterId/lessons/:lessonId/edit" element={<LessonForm />} />
 
               {/* Document Center */}
               <Route path="/documents" element={<Documents />} />

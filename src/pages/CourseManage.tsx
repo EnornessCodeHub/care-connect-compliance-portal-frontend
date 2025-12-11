@@ -121,18 +121,13 @@ export default function CourseManage() {
                   courses.map(c => (
                     <TableRow key={c.id}>
                       <TableCell>
-                        <Link className="text-primary hover:underline" to={`/course/${c.id}/chapters`}>
-                          {c.title}
-                        </Link>
+                        <span className="text-foreground">{c.title}</span>
                       </TableCell>
                       <TableCell>
                         {new Date(c.updated_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell>{c.published ? 'Active' : 'Draft'}</TableCell>
                       <TableCell className="space-x-2">
-                        <Button size="sm" variant="default" asChild>
-                          <Link to={`/course/${c.id}/chapters`}>Add Chapters</Link>
-                        </Button>
                         <Button size="sm" variant="outline" asChild>
                           <Link to={`/course/edit/${c.id}`}>Edit Course</Link>
                         </Button>

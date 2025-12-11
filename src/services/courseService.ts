@@ -81,6 +81,22 @@ export interface ChapterListResponse {
 
 // ==================== Lesson Types ====================
 
+export type LessonType = 'text' | 'pdf' | 'quiz';
+
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  type: 'multiple_choice' | 'true_false' | 'short_answer';
+  options?: string[];
+  correct_answer: string | number;
+  points: number;
+}
+
+export interface QuizData {
+  questions: QuizQuestion[];
+  passing_score: number;
+}
+
 export interface Lesson {
   id: number;
   chapter_id: number;
@@ -89,7 +105,12 @@ export interface Lesson {
   description?: string;
   order: number;
   is_active: boolean;
+  lesson_type?: LessonType;
   content?: string;
+  pdf_url?: string;
+  quiz_data?: QuizData;
+  is_prerequisite?: boolean;
+  is_free_preview?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -307,7 +328,13 @@ class CourseService {
     description?: string;
     order?: number;
     is_active?: boolean;
+    lesson_type?: LessonType;
     content?: string;
+    pdf?: string; // Base64 PDF data URL
+    pdf_url?: string;
+    quiz_data?: QuizData;
+    is_prerequisite?: boolean;
+    is_free_preview?: boolean;
   }): Promise<LessonResponse> {
     const response = await api.post<LessonResponse>(`/courses/${courseId}/chapters/${chapterId}/lessons`, data);
     return response.data;
@@ -321,7 +348,13 @@ class CourseService {
     description?: string;
     order?: number;
     is_active?: boolean;
+    lesson_type?: LessonType;
     content?: string;
+    pdf?: string; // Base64 PDF data URL
+    pdf_url?: string;
+    quiz_data?: QuizData;
+    is_prerequisite?: boolean;
+    is_free_preview?: boolean;
   }): Promise<LessonResponse> {
     const response = await api.put<LessonResponse>(`/courses/${courseId}/chapters/${chapterId}/lessons/${lessonId}`, data);
     return response.data;

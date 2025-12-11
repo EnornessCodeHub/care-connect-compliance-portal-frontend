@@ -20,8 +20,12 @@ import {
   CheckCircle2, 
   Circle,
   Award,
-  Loader2
+  Loader2,
+  FileText,
+  Download,
+  Play
 } from 'lucide-react';
+import { QuizData, QuizQuestion } from '@/services/courseService';
 
 interface FlatLesson extends Lesson {
   chapterId: number;
@@ -41,6 +45,9 @@ export default function CourseContent() {
   const [loading, setLoading] = useState(false);
   const [markingComplete, setMarkingComplete] = useState(false);
   const [certificateIssued, setCertificateIssued] = useState(false);
+  const [quizAnswers, setQuizAnswers] = useState<Record<number, Record<string, string | number>>>({});
+  const [quizSubmitted, setQuizSubmitted] = useState<Record<number, boolean>>({});
+  const [quizScores, setQuizScores] = useState<Record<number, number>>({});
 
   // Load course data and progress
   useEffect(() => {
@@ -284,7 +291,78 @@ export default function CourseContent() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <>
+      <style>{`
+        .lesson-content img {
+          max-width: 100%;
+          height: auto;
+          margin: 1rem 0;
+          border-radius: 8px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .lesson-content iframe {
+          width: 100%;
+          max-width: 560px;
+          height: auto;
+          aspect-ratio: 16 / 9;
+          margin: 1rem 0;
+          border-radius: 8px;
+        }
+        .lesson-content video {
+          max-width: 100%;
+          height: auto;
+          margin: 1rem 0;
+          border-radius: 8px;
+        }
+        .lesson-content p {
+          margin-bottom: 1rem;
+          line-height: 1.7;
+        }
+        .lesson-content h1, .lesson-content h2, .lesson-content h3,
+        .lesson-content h4, .lesson-content h5, .lesson-content h6 {
+          margin-top: 1.5rem;
+          margin-bottom: 1rem;
+          font-weight: 600;
+        }
+        .lesson-content ul, .lesson-content ol {
+          margin: 1rem 0;
+          padding-left: 2rem;
+        }
+        .lesson-content blockquote {
+          border-left: 4px solid #3b82f6;
+          padding-left: 1rem;
+          margin: 1rem 0;
+          font-style: italic;
+          color: #6b7280;
+        }
+        .lesson-content code {
+          background-color: #f3f4f6;
+          padding: 0.2rem 0.4rem;
+          border-radius: 4px;
+          font-size: 0.9em;
+        }
+        .lesson-content pre {
+          background-color: #1f2937;
+          color: #f9fafb;
+          padding: 1rem;
+          border-radius: 8px;
+          overflow-x: auto;
+          margin: 1rem 0;
+        }
+        .lesson-content pre code {
+          background-color: transparent;
+          padding: 0;
+          color: inherit;
+        }
+        .lesson-content a {
+          color: #3b82f6;
+          text-decoration: underline;
+        }
+        .lesson-content a:hover {
+          color: #2563eb;
+        }
+      `}</style>
+      <div className="h-screen flex flex-col bg-background">
       {/* Header */}
       <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
@@ -399,18 +477,191 @@ export default function CourseContent() {
                       <p className="text-lg text-muted-foreground">{selectedLesson.description}</p>
                     )}
 
-                    <div className="prose max-w-none">
-                      {selectedLesson.content ? (
-                        <div 
-                          className="text-base leading-relaxed whitespace-pre-wrap"
-                          dangerouslySetInnerHTML={{ __html: selectedLesson.content }}
-                        />
-                      ) : (
-                        <div className="text-muted-foreground italic">
-                          No content available for this lesson yet.
+                    {/* Lesson Content Based on Type */}
+                    {selectedLesson.lesson_type === 'text' && (
+                      <div className="prose max-w-none">
+                        {selectedLesson.content ? (
+                          <div 
+                            className="text-base leading-relaxed lesson-content"
+                            dangerouslySetInnerHTML={{ __html: selectedLesson.content }}
+                            style={{
+                              wordBreak: 'break-word'
+                            }}
+                          />
+                        ) : (
+                          <div className="text-muted-foreground italic">
+                            No content available for this lesson yet.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedLesson.lesson_type === 'pdf' && (() => {
+                      // Construct full PDF URL
+                      const getPdfUrl = (pdfUrl: string | undefined): string | null => {
+                        if (!pdfUrl) return null;
+                        
+                        // If already a full URL, return as is
+                        if (pdfUrl.startsWith('http://') || pdfUrl.startsWith('https://')) {
+                          return pdfUrl;
+                        }
+                        
+                        // Get base URL from environment and remove /api/v1
+                        const baseUrl = import.meta.env.VITE_BASE_URL || 'http://localhost:3001/api/v1';
+                        const serverBase = baseUrl.replace('/api/v1', '');
+                        
+                        // If pdfUrl starts with course_pdfs/, use it directly
+                        if (pdfUrl.startsWith('/course_pdfs/')) {
+                          return `${serverBase}${pdfUrl}`;
+                        }
+                        
+                        // Otherwise, assume it's just the filename
+                        return `${serverBase}/course_pdfs/${pdfUrl}`;
+                      };
+                      
+                      const fullPdfUrl = getPdfUrl(selectedLesson.pdf_url);
+                      
+                      return (
+                        <div className="space-y-4">
+                          {fullPdfUrl ? (
+                            <div className="border rounded-lg p-6 bg-muted/50">
+                              <div className="flex items-center gap-4 mb-4">
+                                <FileText className="h-8 w-8 text-primary" />
+                                <div className="flex-1">
+                                  <h3 className="font-semibold">PDF Document</h3>
+                                  <p className="text-sm text-muted-foreground">
+                                    View or download the PDF file
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  asChild
+                                  variant="default"
+                                  className="flex-1 sm:flex-none"
+                                >
+                                  <a
+                                    href={fullPdfUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2"
+                                  >
+                                    <Play className="h-4 w-4" />
+                                    View PDF
+                                  </a>
+                                </Button>
+                                <Button
+                                  asChild
+                                  variant="outline"
+                                  className="flex-1 sm:flex-none"
+                                >
+                                  <a
+                                    href={fullPdfUrl}
+                                    download
+                                    className="flex items-center gap-2"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                    Download
+                                  </a>
+                                </Button>
+                              </div>
+                              <div className="mt-4">
+                                <iframe
+                                  src={`${fullPdfUrl}#toolbar=0`}
+                                  className="w-full h-[600px] border rounded"
+                                  title="PDF Viewer"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-muted-foreground italic text-center py-8 border rounded-lg">
+                              No PDF file available for this lesson yet.
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
+
+                    {selectedLesson.lesson_type === 'quiz' && (() => {
+                      // Parse quiz_data if it's a string
+                      let parsedQuizData: QuizData | null = null;
+                      
+                      if (selectedLesson.quiz_data) {
+                        try {
+                          // Debug: Log the raw quiz_data
+                          console.log('Raw quiz_data:', selectedLesson.quiz_data);
+                          console.log('Type of quiz_data:', typeof selectedLesson.quiz_data);
+                          
+                          if (typeof selectedLesson.quiz_data === 'string') {
+                            parsedQuizData = JSON.parse(selectedLesson.quiz_data);
+                          } else {
+                            parsedQuizData = selectedLesson.quiz_data as QuizData;
+                          }
+                          
+                          // Debug: Log parsed data
+                          console.log('Parsed quiz_data:', parsedQuizData);
+                          console.log('Questions:', parsedQuizData?.questions);
+                        } catch (error) {
+                          console.error('Error parsing quiz_data:', error);
+                          parsedQuizData = null;
+                        }
+                      } else {
+                        console.log('No quiz_data found in selectedLesson:', selectedLesson);
+                      }
+                      
+                      if (!parsedQuizData) {
+                        return (
+                          <div className="text-center py-8 text-muted-foreground border rounded-lg">
+                            <p>No quiz data available for this lesson.</p>
+                            <p className="text-xs mt-2">Debug: lesson_type={selectedLesson.lesson_type}, quiz_data={selectedLesson.quiz_data ? 'exists' : 'missing'}</p>
+                          </div>
+                        );
+                      }
+                      
+                      return (
+                        <QuizViewer
+                          lessonId={selectedLesson.id}
+                          quizData={parsedQuizData}
+                          quizAnswers={quizAnswers[selectedLesson.id] || {}}
+                          quizSubmitted={quizSubmitted[selectedLesson.id] || false}
+                          quizScore={quizScores[selectedLesson.id]}
+                          onAnswerChange={(questionId, answer) => {
+                            setQuizAnswers(prev => ({
+                              ...prev,
+                              [selectedLesson.id]: {
+                                ...(prev[selectedLesson.id] || {}),
+                                [questionId]: answer
+                              }
+                            }));
+                          }}
+                          onSubmit={(score) => {
+                            setQuizSubmitted(prev => ({
+                              ...prev,
+                              [selectedLesson.id]: true
+                            }));
+                            setQuizScores(prev => ({
+                              ...prev,
+                              [selectedLesson.id]: score
+                            }));
+                          }}
+                        />
+                      );
+                    })()}
+
+                    {!selectedLesson.lesson_type && (
+                      <div className="prose max-w-none">
+                        {selectedLesson.content ? (
+                          <div 
+                            className="text-base leading-relaxed"
+                            dangerouslySetInnerHTML={{ __html: selectedLesson.content }}
+                          />
+                        ) : (
+                          <div className="text-muted-foreground italic">
+                            No content available for this lesson yet.
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Mark as Complete Button */}
                     <div className="pt-6 border-t space-y-4">
@@ -468,6 +719,269 @@ export default function CourseContent() {
           )}
         </div>
       </div>
+    </div>
+    </>
+  );
+}
+
+// Quiz Viewer Component
+interface QuizViewerProps {
+  lessonId: number;
+  quizData: QuizData;
+  quizAnswers: Record<string, string | number>;
+  quizSubmitted: boolean;
+  quizScore?: number;
+  onAnswerChange: (questionId: string, answer: string | number) => void;
+  onSubmit: (score: number) => void;
+}
+
+function QuizViewer({
+  quizData,
+  quizAnswers,
+  quizSubmitted,
+  quizScore,
+  onAnswerChange,
+  onSubmit
+}: QuizViewerProps) {
+  const { toast } = useToast();
+  const [localAnswers, setLocalAnswers] = useState<Record<string, string | number>>(quizAnswers);
+
+  // Ensure quizData and questions exist
+  if (!quizData || !quizData.questions || !Array.isArray(quizData.questions)) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <p>No quiz data available for this lesson.</p>
+      </div>
+    );
+  }
+
+  const questions = quizData.questions || [];
+  const passingScore = quizData.passing_score || 70;
+
+  const handleAnswerChange = (questionId: string, answer: string | number) => {
+    setLocalAnswers(prev => ({
+      ...prev,
+      [questionId]: answer
+    }));
+    onAnswerChange(questionId, answer);
+  };
+
+  const handleSubmit = () => {
+    if (questions.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No questions in this quiz."
+      });
+      return;
+    }
+
+    let correctCount = 0;
+    let totalPoints = 0;
+    let earnedPoints = 0;
+
+    questions.forEach(question => {
+      totalPoints += question.points;
+      const userAnswer = localAnswers[question.id];
+      const correctAnswer = question.correct_answer;
+
+      if (userAnswer !== undefined) {
+        if (question.type === 'multiple_choice' || question.type === 'true_false') {
+          if (Number(userAnswer) === Number(correctAnswer)) {
+            correctCount++;
+            earnedPoints += question.points;
+          }
+        } else if (question.type === 'short_answer') {
+          const userAnswerStr = String(userAnswer).toLowerCase().trim();
+          const correctAnswerStr = String(correctAnswer).toLowerCase().trim();
+          if (userAnswerStr === correctAnswerStr) {
+            correctCount++;
+            earnedPoints += question.points;
+          }
+        }
+      }
+    });
+
+    const percentage = (earnedPoints / totalPoints) * 100;
+    const passed = percentage >= passingScore;
+
+    onSubmit(percentage);
+
+    toast({
+      title: passed ? "🎉 Quiz Passed!" : "Quiz Completed",
+      description: `You scored ${percentage.toFixed(1)}% (${earnedPoints}/${totalPoints} points). ${passed ? `Passing score: ${passingScore}%` : `You need ${passingScore}% to pass.`}`,
+      variant: passed ? "default" : "destructive"
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+        <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+          Quiz Instructions
+        </h3>
+        <p className="text-sm text-blue-700 dark:text-blue-300">
+          Answer all questions below. You need to score at least {passingScore}% to pass this quiz.
+        </p>
+        {quizSubmitted && quizScore !== undefined && (
+          <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-800">
+            <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+              Your Score: {quizScore.toFixed(1)}%
+              {quizScore >= passingScore ? (
+                <span className="ml-2 text-green-600 dark:text-green-400">✓ Passed</span>
+              ) : (
+                <span className="ml-2 text-red-600 dark:text-red-400">✗ Failed</span>
+              )}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-6">
+        {questions.map((question, index) => {
+          const userAnswer = localAnswers[question.id];
+          const correctAnswer = question.correct_answer;
+          const isCorrect = quizSubmitted && userAnswer !== undefined && 
+            (question.type === 'multiple_choice' || question.type === 'true_false' 
+              ? Number(userAnswer) === Number(correctAnswer)
+              : String(userAnswer).toLowerCase().trim() === String(correctAnswer).toLowerCase().trim());
+
+          return (
+            <Card key={question.id} className={quizSubmitted ? (isCorrect ? 'border-green-500' : 'border-red-500') : ''}>
+              <CardContent className="p-6">
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold">
+                      {index + 1}
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-lg mb-2">{question.question}</h4>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        {question.points} point{question.points !== 1 ? 's' : ''}
+                      </p>
+
+                      {question.type === 'multiple_choice' && question.options && (
+                        <div className="space-y-2">
+                          {question.options.map((option, optIndex) => (
+                            <label
+                              key={optIndex}
+                              className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                                quizSubmitted
+                                  ? optIndex === Number(correctAnswer)
+                                    ? 'bg-green-50 dark:bg-green-950 border-green-500'
+                                    : Number(userAnswer) === optIndex && optIndex !== Number(correctAnswer)
+                                    ? 'bg-red-50 dark:bg-red-950 border-red-500'
+                                    : 'bg-muted border-muted-foreground/20'
+                                  : userAnswer === optIndex
+                                  ? 'bg-primary/10 border-primary'
+                                  : 'hover:bg-muted border-border'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`question-${question.id}`}
+                                value={optIndex}
+                                checked={userAnswer === optIndex}
+                                onChange={(e) => handleAnswerChange(question.id, Number(e.target.value))}
+                                disabled={quizSubmitted}
+                                className="w-4 h-4"
+                              />
+                              <span className="flex-1">{option}</span>
+                              {quizSubmitted && optIndex === Number(correctAnswer) && (
+                                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                              )}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {question.type === 'true_false' && (
+                        <div className="space-y-2">
+                          {['True', 'False'].map((option, optIndex) => (
+                            <label
+                              key={optIndex}
+                              className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                                quizSubmitted
+                                  ? optIndex === Number(correctAnswer)
+                                    ? 'bg-green-50 dark:bg-green-950 border-green-500'
+                                    : Number(userAnswer) === optIndex && optIndex !== Number(correctAnswer)
+                                    ? 'bg-red-50 dark:bg-red-950 border-red-500'
+                                    : 'bg-muted border-muted-foreground/20'
+                                  : userAnswer === optIndex
+                                  ? 'bg-primary/10 border-primary'
+                                  : 'hover:bg-muted border-border'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`question-${question.id}`}
+                                value={optIndex}
+                                checked={userAnswer === optIndex}
+                                onChange={(e) => handleAnswerChange(question.id, Number(e.target.value))}
+                                disabled={quizSubmitted}
+                                className="w-4 h-4"
+                              />
+                              <span className="flex-1">{option}</span>
+                              {quizSubmitted && optIndex === Number(correctAnswer) && (
+                                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                              )}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {question.type === 'short_answer' && (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={userAnswer !== undefined ? String(userAnswer) : ''}
+                            onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                            disabled={quizSubmitted}
+                            placeholder="Enter your answer"
+                            className={`w-full px-4 py-2 border rounded-lg ${
+                              quizSubmitted
+                                ? isCorrect
+                                  ? 'bg-green-50 dark:bg-green-950 border-green-500'
+                                  : 'bg-red-50 dark:bg-red-950 border-red-500'
+                                : ''
+                            }`}
+                          />
+                          {quizSubmitted && (
+                            <div className="text-sm">
+                              {isCorrect ? (
+                                <p className="text-green-600 dark:text-green-400 flex items-center gap-2">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  Correct! The answer is: {String(correctAnswer)}
+                                </p>
+                              ) : (
+                                <p className="text-red-600 dark:text-red-400">
+                                  Incorrect. The correct answer is: {String(correctAnswer)}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {!quizSubmitted && (
+        <div className="pt-4 border-t">
+          <Button
+            onClick={handleSubmit}
+            disabled={Object.keys(localAnswers).length < questions.length}
+            className="w-full sm:w-auto"
+          >
+            Submit Quiz
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
