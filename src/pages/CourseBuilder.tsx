@@ -563,25 +563,46 @@ export default function CourseBuilderNew() {
                   {chapter.isExpanded && (
                     <div className="ml-6 space-y-1">
                       {chapter.lessons.map((lesson, lessonIndex) => (
-                        <button
+                        <div
                           key={lessonIndex}
-                          onClick={() => {
-                            setSelectedChapterIndex(chapterIndex);
-                            setSelectedLessonIndex(lessonIndex);
-                        if (isMobile) setSidebarOpen(false);
-                          }}
                           className={cn(
-                            "w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2",
+                            "group w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
                             selectedChapterIndex === chapterIndex && selectedLessonIndex === lessonIndex
                               ? "bg-primary text-primary-foreground"
                               : "hover:bg-muted"
                           )}
                         >
-                          {lesson.lesson_type === 'text' && <FileText className="h-4 w-4" />}
-                          {lesson.lesson_type === 'pdf' && <File className="h-4 w-4" />}
-                          {lesson.lesson_type === 'quiz' && <HelpCircle className="h-4 w-4" />}
-                          <span className="truncate">{lesson.title || `Lesson ${lessonIndex + 1}`}</span>
-                        </button>
+                          <button
+                            onClick={() => {
+                              setSelectedChapterIndex(chapterIndex);
+                              setSelectedLessonIndex(lessonIndex);
+                              if (isMobile) setSidebarOpen(false);
+                            }}
+                            className="flex-1 text-left flex items-center gap-2 min-w-0"
+                          >
+                            {lesson.lesson_type === 'text' && <FileText className="h-4 w-4 flex-shrink-0" />}
+                            {lesson.lesson_type === 'pdf' && <File className="h-4 w-4 flex-shrink-0" />}
+                            {lesson.lesson_type === 'quiz' && <HelpCircle className="h-4 w-4 flex-shrink-0" />}
+                            <span className="truncate">{lesson.title || `Lesson ${lessonIndex + 1}`}</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm('Are you sure you want to delete this lesson?')) {
+                                deleteLesson(chapterIndex, lessonIndex);
+                              }
+                            }}
+                            className={cn(
+                              "opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/20 flex-shrink-0",
+                              selectedChapterIndex === chapterIndex && selectedLessonIndex === lessonIndex
+                                ? "text-primary-foreground hover:text-destructive"
+                                : "text-muted-foreground hover:text-destructive"
+                            )}
+                            title="Delete lesson"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       ))}
                       <button
                     onClick={() => {
@@ -905,6 +926,8 @@ const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillR
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // Use local container ref to avoid conflicts
   const localQuillContainerRef = useRef<HTMLDivElement>(null);
+  // Store original lesson data for discard functionality
+  const originalLessonRef = useRef<LessonFormData>({ ...lesson });
 
   // Define handlers before using them in Quill initialization
   const handleImageUpload = React.useCallback(() => {
@@ -1234,6 +1257,49 @@ const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillR
     onUpdate({ content: html });
   }, [onUpdate]);
 
+  // Update original lesson ref when lesson changes
+  useEffect(() => {
+    originalLessonRef.current = { ...lesson };
+    setContent(lesson.content || '');
+    setPdfFile(null);
+  }, [lesson.id, lesson.lesson_type]);
+
+  // Handle discard changes - restore all original values
+  const handleDiscardChanges = React.useCallback(() => {
+    const original = originalLessonRef.current;
+    
+    // Restore all fields to original values
+    onUpdate({
+      title: original.title,
+      description: original.description,
+      content: original.content,
+      pdf_file: undefined, // Clear any new PDF file
+      pdf_url: original.pdf_url, // Restore original PDF URL
+      quiz_data: original.quiz_data,
+      is_prerequisite: original.is_prerequisite,
+      is_free_preview: original.is_free_preview,
+    });
+    
+    // Reset local state
+    setContent(original.content || '');
+    setPdfFile(null);
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    
+    // For text lessons, update Quill editor content
+    if (lesson.lesson_type === 'text' && quillRef.current) {
+      quillRef.current.root.innerHTML = original.content || '';
+    }
+    
+    toast({
+      title: "Changes discarded",
+      description: "All changes have been reverted to the original values."
+    });
+  }, [lesson.lesson_type, onUpdate, toast]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -1292,10 +1358,7 @@ const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillR
             <LessonSettings lesson={lesson} onUpdate={onUpdate} />
             
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-4 border-t">
-              <Button variant="outline" onClick={() => {
-                // Discard changes - reset to original
-                setContent(lesson.content || '');
-              }} className="w-full sm:w-auto">
+              <Button variant="outline" onClick={handleDiscardChanges} className="w-full sm:w-auto">
                 Discard changes
               </Button>
               <Button onClick={() => {
@@ -1448,9 +1511,7 @@ const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillR
             <LessonSettings lesson={lesson} onUpdate={onUpdate} />
             
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-4 border-t">
-              <Button variant="outline" onClick={() => {
-                setPdfFile(null);
-              }} className="w-full sm:w-auto">
+              <Button variant="outline" onClick={handleDiscardChanges} className="w-full sm:w-auto">
                 Discard changes
               </Button>
               <Button onClick={() => {
@@ -1498,7 +1559,7 @@ const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillR
             <LessonSettings lesson={lesson} onUpdate={onUpdate} />
             
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-4 border-t">
-              <Button variant="outline" className="w-full sm:w-auto">
+              <Button variant="outline" onClick={handleDiscardChanges} className="w-full sm:w-auto">
                 Discard changes
               </Button>
               <Button onClick={() => {

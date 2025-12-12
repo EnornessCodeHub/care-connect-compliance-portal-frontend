@@ -9,7 +9,7 @@ import authService from '@/services/authService';
 // Create axios instance
 const api = axios.create({
   baseURL: import.meta.env.VITE_BASE_URL,
-  timeout: 30000, // 30 seconds
+  timeout: 60000, // 60 seconds
   headers: {
     'Content-Type': 'application/json',
   },
