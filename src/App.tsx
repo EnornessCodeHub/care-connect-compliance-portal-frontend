@@ -38,6 +38,7 @@ import CourseManage from "./pages/CourseManage";
 import CourseBuilder from "./pages/CourseBuilder";
 import CourseForm from "./pages/CourseForm";
 import CourseContent from "./pages/CourseContent";
+import MasterTrainingReport from "./pages/MasterTrainingReport";
 
 // Document Center
 import Documents from "./pages/Documents";
@@ -149,6 +150,7 @@ const App = () => (
                 } 
               />
               <Route path="/course/certificates" element={<TrainingCertificates />} />
+              <Route path="/course/report" element={<MasterTrainingReport />} />
               <Route path="/course/library" element={<TrainingLibrary />} />
               <Route path="/course/manage" element={<CourseManage />} />
               <Route path="/course/create" element={<CourseBuilder />} />

@@ -122,6 +122,11 @@ const menuItems = [
       { title: "Templates", url: "/forms/templates" },
     ],
   },
+  {
+    title: "Tracking & Reporting",
+    url: "/course/report",
+    icon: BarChart3,
+  },
   // trimmed legacy: Incidents
   // trimmed legacy: Complaints
   // trimmed legacy: Reports
@@ -170,6 +175,9 @@ export function AppSidebar() {
       
       // Hide Notifications for staff
       if (item.title === "Notifications") return false;
+
+      // Hide Tracking & Reporting (master training report) for staff
+      if (item.title === "Tracking & Reporting") return false;
     }
     return true;
   }).map(item => {
@@ -177,7 +185,9 @@ export function AppSidebar() {
     if (item.title === "Training & Courses" && item.items && !isAdmin) {
       return {
         ...item,
-        items: item.items.filter(subItem => subItem.title !== "Progress Dashboard")
+        items: item.items.filter(
+          subItem => subItem.title !== "Progress Dashboard"
+        )
       };
     }
     
