@@ -128,6 +128,21 @@ export interface LessonListResponse {
   count: number;
 }
 
+export type QuizDifficulty = 'easy' | 'medium' | 'hard';
+
+export interface AiGenerateQuizRequest {
+  question_count: number;
+  difficulty: QuizDifficulty;
+}
+
+export interface AiGenerateQuizResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    quiz_data: QuizData;
+  };
+}
+
 // ==================== Progress Types ====================
 
 export interface CourseProgress {
@@ -365,6 +380,21 @@ class CourseService {
    */
   async deleteLesson(courseId: number, chapterId: number, lessonId: number): Promise<{ success: boolean; message: string }> {
     const response = await api.delete<{ success: boolean; message: string }>(`/courses/${courseId}/chapters/${chapterId}/lessons/${lessonId}`);
+    return response.data;
+  }
+
+  /**
+   * AI-generate quiz_data for a chapter (does not persist on backend; returns quiz_data only)
+   */
+  async aiGenerateQuizForChapter(
+    courseId: number,
+    chapterId: number,
+    data: AiGenerateQuizRequest
+  ): Promise<AiGenerateQuizResponse> {
+    const response = await api.post<AiGenerateQuizResponse>(
+      `/courses/${courseId}/chapters/${chapterId}/ai-generate-quiz`,
+      data
+    );
     return response.data;
   }
 

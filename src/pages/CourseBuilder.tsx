@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -19,6 +21,7 @@ import {
   Trash2, 
   GripVertical, 
   ChevronUp,
+  ChevronDown,
   FileText,
   File,
   HelpCircle,
@@ -27,9 +30,10 @@ import {
   Upload,
   Save,
   Menu,
-  Eye
+  Eye,
+  Sparkles
 } from 'lucide-react';
-import courseService, { LessonType, QuizData, QuizQuestion } from '@/services/courseService';
+import courseService, { LessonType, QuizData, QuizDifficulty, QuizQuestion } from '@/services/courseService';
 import staffService, { Staff } from '@/services/staffService';
 import { useToast } from '@/hooks/use-toast';
 import Quill from 'quill';
@@ -737,6 +741,8 @@ export default function CourseBuilderNew() {
             lesson={selectedLesson}
             chapterIndex={selectedChapterIndex!}
             lessonIndex={selectedLessonIndex!}
+            courseId={id ? parseInt(id) : undefined}
+            chapterId={selectedChapter?.id}
             onUpdate={(updates) =>
               updateLesson(selectedChapterIndex!, selectedLessonIndex!, updates)
             }
@@ -884,12 +890,14 @@ interface LessonEditorProps {
   lesson: LessonFormData;
   chapterIndex: number;
   lessonIndex: number;
+  courseId?: number;
+  chapterId?: number;
   onUpdate: (updates: Partial<LessonFormData>) => void;
   quillRef: React.RefObject<Quill | null>;
   quillContainerRef: React.RefObject<HTMLDivElement>;
 }
 
-const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillRef, quillContainerRef }: LessonEditorProps) {
+const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillRef, quillContainerRef, courseId, chapterId }: LessonEditorProps) {
   const { toast } = useToast();
   const [content, setContent] = useState(lesson.content || '');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -1483,6 +1491,8 @@ const LessonEditor = React.memo(function LessonEditor({ lesson, onUpdate, quillR
             <QuizEditor
               quizData={lesson.quiz_data}
               onUpdate={(quizData) => onUpdate({ quiz_data: quizData })}
+              courseId={courseId}
+              chapterId={chapterId}
             />
 
             <LessonSettings lesson={lesson} onUpdate={onUpdate} />
@@ -1840,9 +1850,13 @@ function LessonSettings({ lesson, onUpdate }: LessonSettingsProps) {
 interface QuizEditorProps {
   quizData?: QuizData;
   onUpdate: (quizData: QuizData) => void;
+  courseId?: number;
+  chapterId?: number;
 }
 
-function QuizEditor({ quizData, onUpdate }: QuizEditorProps) {
+function QuizEditor({ quizData, onUpdate, courseId, chapterId }: QuizEditorProps) {
+  const { toast } = useToast();
+
   // Parse quiz_data if it's a string (from backend JSON)
   const parseQuizData = (data: QuizData | string | undefined): QuizData | null => {
     if (!data) {
@@ -1873,6 +1887,12 @@ function QuizEditor({ quizData, onUpdate }: QuizEditorProps) {
   
   const [questions, setQuestions] = useState<QuizQuestion[]>(parsedQuizData?.questions || []);
   const [passingScore, setPassingScore] = useState(parsedQuizData?.passing_score || 70);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiQuestionCount, setAiQuestionCount] = useState<number>(5);
+  const [aiDifficulty, setAiDifficulty] = useState<QuizDifficulty>('medium');
+  const [aiGenerating, setAiGenerating] = useState(false);
+
+  const isAiEnabled = Boolean(courseId && chapterId);
 
   // Update when quizData prop changes (e.g., when loading existing lesson)
   useEffect(() => {
@@ -1891,6 +1911,62 @@ function QuizEditor({ quizData, onUpdate }: QuizEditorProps) {
   useEffect(() => {
     onUpdate({ questions, passing_score: passingScore });
   }, [questions, passingScore, onUpdate]);
+
+  const handleGenerateAiQuiz = async () => {
+    if (!courseId || !chapterId) return;
+
+    try {
+      setAiGenerating(true);
+
+      const response = await courseService.aiGenerateQuizForChapter(courseId, chapterId, {
+        question_count: aiQuestionCount,
+        difficulty: aiDifficulty,
+      });
+
+      if (!response.success || !response.data?.quiz_data) {
+        throw new Error(response.message || 'Failed to generate quiz');
+      }
+
+      const quizDataFromAi = response.data.quiz_data;
+      const now = Date.now();
+
+      const generatedQuestions: QuizQuestion[] = (quizDataFromAi.questions || []).map((q, index) => {
+        const type = q.type as QuizQuestion['type'];
+
+        return {
+          id: `ai_${now}_${index}_${q.id || index}`,
+          question: q.question || '',
+          type,
+          options:
+            type === 'multiple_choice'
+              ? (Array.isArray(q.options) && q.options.length > 0 ? q.options : ['', '', '', ''])
+              : undefined,
+          correct_answer: q.correct_answer ?? '',
+          points: typeof q.points === 'number' && q.points > 0 ? q.points : 1,
+        };
+      });
+
+      // Replace existing list (per requirement)
+      setQuestions(generatedQuestions);
+
+      if (typeof quizDataFromAi.passing_score === 'number') {
+        setPassingScore(quizDataFromAi.passing_score);
+      }
+
+      toast({
+        title: 'Quiz generated',
+        description: 'AI-generated questions have been added to the quiz.',
+      });
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: error?.message || 'Failed to generate quiz',
+      });
+    } finally {
+      setAiGenerating(false);
+    }
+  };
 
   const addQuestion = () => {
     const newQuestion: QuizQuestion = {
@@ -1914,6 +1990,97 @@ function QuizEditor({ quizData, onUpdate }: QuizEditorProps) {
 
   return (
     <div className="space-y-4">
+      <Collapsible open={aiOpen} onOpenChange={setAiOpen}>
+        <div className="border border-pink-100 rounded-lg overflow-hidden">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "w-full flex items-center justify-between px-4 py-3 text-left transition-colors",
+                "bg-pink-50 hover:bg-pink-100/60"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-pink-500" />
+                <span className="text-sm font-medium text-foreground">Create With AI</span>
+              </div>
+
+              <div
+                className={cn(
+                  "h-9 w-9 rounded-full border flex items-center justify-center",
+                  "border-pink-200 bg-white/70"
+                )}
+              >
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 text-muted-foreground transition-transform",
+                    aiOpen && "rotate-180"
+                  )}
+                />
+              </div>
+            </button>
+          </CollapsibleTrigger>
+
+          <CollapsibleContent className="border-t border-pink-100 px-4 py-4 bg-background">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+              <div className="space-y-2">
+                <Label>Number of questions</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={aiQuestionCount}
+                  onChange={(e) => setAiQuestionCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  disabled={!isAiEnabled || aiGenerating}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Difficulty</Label>
+                <select
+                  value={aiDifficulty}
+                  onChange={(e) => setAiDifficulty(e.target.value as QuizDifficulty)}
+                  disabled={!isAiEnabled || aiGenerating}
+                  className="w-full px-3 py-2 border rounded-md bg-background disabled:opacity-50"
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </div>
+
+              <div className="w-full">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex w-full">
+                        <Button
+                          type="button"
+                          className="w-full"
+                          onClick={handleGenerateAiQuiz}
+                          disabled={!isAiEnabled || aiGenerating}
+                        >
+                          {aiGenerating ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              Generating...
+                            </>
+                          ) : (
+                            'Generate'
+                          )}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {!isAiEnabled && (
+                      <TooltipContent>You must save the course first.</TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            </div>
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
+
       <div className="flex items-center justify-between">
         <Label>Quiz Questions</Label>
         <Button onClick={addQuestion} variant="outline" size="sm">
